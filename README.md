@@ -85,7 +85,7 @@ Every push to this GitHub repo automatically builds the app (see the *Actions*
 tab). To install it, on your phone's browser:
 
 1. Open the repo's **Releases** page:
-   `https://github.com/kdog45ak-a11y/Chrono/releases`
+   `https://github.com/JeralInnovations/Chrono/releases`
 2. Under **Latest app build**, download `app-debug.apk`.
 3. Open the downloaded file. Android will warn about installing unknown apps —
    allow it for your browser when prompted, then tap *Install*.
