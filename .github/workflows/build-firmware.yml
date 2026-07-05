@@ -14,6 +14,13 @@ jobs:
       - name: Install Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install adafruit-nrfutil (DFU packaging tool the core invokes)
+        run: pip install adafruit-nrfutil
+
       - name: Install Seeed nRF52 core
         run: |
           arduino-cli config init
