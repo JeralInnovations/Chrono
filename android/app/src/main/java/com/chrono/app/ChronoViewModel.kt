@@ -82,14 +82,14 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun onRawResult(r: RawResult) {
         // FETCH after a reconnect can re-deliver a result we already stored.
-        val duplicate = results.any { it.deviceResultId == r.id && it.splitUs == r.splitUs }
+        val duplicate = results.any { it.deviceResultId == r.id && it.splitNs == r.splitNs }
         if (!duplicate) {
             results.add(
                 0,
                 TestResult(
                     uid = UUID.randomUUID().toString(),
                     deviceResultId = r.id,
-                    splitUs = r.splitUs,
+                    splitNs = r.splitNs,
                     distanceM = distanceM,
                     label = pendingLabel.trim(),
                     epochMillis = if (r.epochSec > 0) r.epochSec * 1000L else null,

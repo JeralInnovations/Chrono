@@ -379,7 +379,7 @@ private fun ResultCard(r: TestResult, latest: Boolean, onEdit: () -> Unit) {
                         color = TextDim,
                     )
                     Text(
-                        "%.3f ms split".format(r.splitUs / 1000.0),
+                        "%.3f ms split".format(r.splitMillis),
                         style = MaterialTheme.typography.bodyMedium,
                         color = TextDim,
                     )

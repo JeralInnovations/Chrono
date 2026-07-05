@@ -12,14 +12,16 @@ import java.time.format.DateTimeFormatter
 data class TestResult(
     val uid: String,
     val deviceResultId: Int,
-    val splitUs: Long,
+    /** Split between the two gates, in nanoseconds (62.5 ns hardware resolution). */
+    val splitNs: Long,
     val distanceM: Double,
     var label: String,
     /** null = device had no synced clock at the time of the shot */
     var epochMillis: Long?,
 ) {
-    val splitSeconds: Double get() = splitUs / 1_000_000.0
-    val metersPerSecond: Double get() = if (splitUs > 0 && distanceM > 0) distanceM / splitSeconds else 0.0
+    val splitSeconds: Double get() = splitNs / 1_000_000_000.0
+    val splitMillis: Double get() = splitNs / 1_000_000.0
+    val metersPerSecond: Double get() = if (splitNs > 0 && distanceM > 0) distanceM / splitSeconds else 0.0
     val feetPerSecond: Double get() = metersPerSecond * 3.28084
 
     fun formattedDate(): String? {
@@ -50,7 +52,7 @@ class ResultStore(context: Context) {
                 TestResult(
                     uid = o.getString("uid"),
                     deviceResultId = o.getInt("deviceResultId"),
-                    splitUs = o.getLong("splitUs"),
+                    splitNs = o.getLong("splitNs"),
                     distanceM = o.getDouble("distanceM"),
                     label = o.optString("label", ""),
                     epochMillis = o.optLong("epochMillis", -1L).takeIf { it > 0 },
@@ -66,7 +68,7 @@ class ResultStore(context: Context) {
                 JSONObject()
                     .put("uid", r.uid)
                     .put("deviceResultId", r.deviceResultId)
-                    .put("splitUs", r.splitUs)
+                    .put("splitNs", r.splitNs)
                     .put("distanceM", r.distanceM)
                     .put("label", r.label)
                     .put("epochMillis", r.epochMillis ?: -1L)

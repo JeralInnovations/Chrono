@@ -49,7 +49,7 @@ object Proto {
 
 data class DeviceStatus(val state: Int, val pendingCount: Int, val timeValid: Boolean)
 
-data class RawResult(val id: Int, val splitUs: Long, val epochSec: Long)
+data class RawResult(val id: Int, val splitNs: Long, val epochSec: Long)
 
 data class FoundDevice(val device: BluetoothDevice, val name: String, val rssi: Int)
 
@@ -288,9 +288,9 @@ class ChronoBle(private val context: Context) {
             Proto.RESULT -> if (v.size >= 11) {
                 val b = ByteBuffer.wrap(v).order(ByteOrder.LITTLE_ENDIAN)
                 val id = b.short.toInt() and 0xFFFF
-                val splitUs = b.int.toLong() and 0xFFFFFFFFL
+                val splitNs = b.int.toLong() and 0xFFFFFFFFL
                 val epochSec = b.int.toLong() and 0xFFFFFFFFL
-                results.tryEmit(RawResult(id, splitUs, epochSec))
+                results.tryEmit(RawResult(id, splitNs, epochSec))
             }
         }
     }

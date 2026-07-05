@@ -156,9 +156,14 @@ Each result shows **ft/s**, **m/s**, and the raw **split in milliseconds**
 
 ## 5. Design notes & limits
 
-- **Timing accuracy** — the split is captured with GPIO interrupts and `micros()`;
-  expect a few microseconds of jitter, which is negligible for split times in the
-  millisecond range and up.
+- **Timing accuracy** — the split is captured entirely in hardware
+  (GPIOTE → PPI → TIMER2 at 16 MHz), so the timestamp is frozen the instant the
+  edge arrives, independent of the CPU or the BLE stack. Resolution is 62.5 ns and
+  the split is reported in nanoseconds. The crystal (HFXO) is held on while armed so
+  the timer runs accurately; a PPI fork disables each channel after its first edge
+  so piezo ringing can't overwrite a timestamp. At a 250 µs split (≈3000 fps over
+  9 in) the timer contributes well under 0.05% error — your sensor matching and
+  gate-spacing measurement dominate, not the electronics.
 - **One-shot arming** — after each shot the device disarms itself; tap ARM again
   for the next test. Results are only deleted from the device after the app
   confirms it has stored them.
@@ -179,7 +184,7 @@ Service `a5c40001-9d95-4e4c-8c5a-c1d6f2a80de1`
 |---|---|---|---|
 | Status  | `a5c40002` | read/notify | `[state, pendingCount, timeValid]` |
 | Control | `a5c40003` | write | `[cmd, argLo, argHi]` |
-| Result  | `a5c40004` | read/notify | `id:u16, splitUs:u32, epoch:u32, flags:u8` (LE) |
+| Result  | `a5c40004` | read/notify | `id:u16, splitNs:u32, epoch:u32, flags:u8` (LE) |
 | Time    | `a5c40005` | write | unix seconds `u32` (LE) |
 
 States: 0 idle · 1/3 verifying sensor 1/2 · 2/4 sensor 1/2 OK · 5 armed · 6 running.
