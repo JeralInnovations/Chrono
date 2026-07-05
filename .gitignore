@@ -1,0 +1,15 @@
+# Personal files not part of the project
+102010448.pdf
+
+# Gradle / Android Studio
+android/.gradle/
+android/.idea/
+android/local.properties
+android/build/
+android/app/build/
+android/captures/
+android/.kotlin/
+*.iml
+*.apk
+*.hprof
+.DS_Store

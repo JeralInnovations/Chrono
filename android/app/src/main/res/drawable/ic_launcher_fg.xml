@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- stopwatch ring -->
+    <path
+        android:pathData="M54,32 a22,22 0 1,0 0.01,0 Z"
+        android:strokeColor="#F5A524"
+        android:strokeWidth="5"
+        android:fillColor="#00000000" />
+    <!-- crown -->
+    <path
+        android:pathData="M48,24 h12 v6 h-12 Z"
+        android:fillColor="#F5A524" />
+    <!-- hand -->
+    <path
+        android:pathData="M54,54 L66,44"
+        android:strokeColor="#2DD4BF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M54,54 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0"
+        android:fillColor="#2DD4BF" />
+</vector>
