@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BluetoothSearching
+import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.PlayCircleOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -167,6 +168,18 @@ fun ConnectScreen(vm: ChronoViewModel, connState: ConnState) {
             )
             Spacer(Modifier.size(8.dp))
             Text("Simulation mode — no hardware needed", color = TextDim)
+        }
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = { vm.enterManualMode() },
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+        ) {
+            Icon(
+                Icons.Filled.EditNote, null,
+                tint = TextDim, modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.size(8.dp))
+            Text("Manual logging — no chrono connected", color = TextDim)
         }
     }
 }

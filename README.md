@@ -151,6 +151,19 @@ The dashboard's **Channel calibration** card shows each port's measured load
 loaded sweep any time (sensors attached, undisturbed). Every sweep is appended
 to `cal_history.jsonl` in the app's private storage for later analysis.
 
+**Test folders, photos, and manual entries.** All field data lives in a
+browsable folder on the phone:
+`Android/data/com.chrono.app/files/ChronoData/Test_<date>/Shot_NNNN/`, where
+each shot folder holds `shot.json` (the full log) plus any photos. On every
+app launch you're asked to keep logging into the previous test folder or
+start a new one. After setup the app prompts for **setup photos** of the rig,
+and after every measurement for **after photos** — both use the phone's
+camera and land in that shot's folder. **Log manual entry** (dashboard, or
+"Manual logging" on the connect screen) records a shot with no chronograph:
+typed velocity (ft/s or m/s, optional), all detail blanks, date/time, and the
+same photo prompts. Tapping an empty date box autofills the current date and
+pre-selects the time for quick editing.
+
 **Exporting data.** The *Export* button above the results list shares a CSV of
 every result (label, date, split, distance, velocities) plus the raw
 calibration history (`.jsonl`) through Android's share sheet — email it,

@@ -12,8 +12,11 @@ import com.chrono.app.ble.ChronoBle
 import com.chrono.app.ble.ConnState
 import com.chrono.app.ble.Proto
 import com.chrono.app.ble.RawResult
+import android.net.Uri
+import androidx.core.content.FileProvider
 import com.chrono.app.data.DistanceUnit
 import com.chrono.app.data.ResultStore
+import com.chrono.app.data.SessionManager
 import com.chrono.app.data.TestResult
 import androidx.compose.runtime.mutableStateMapOf
 import kotlinx.coroutines.Job
@@ -45,6 +48,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     val ble = ChronoBle(app)
     private val store = ResultStore(app)
     private val prefs = app.getSharedPreferences("chrono", Application.MODE_PRIVATE)
+    val session = SessionManager(app)
 
     var screen by mutableStateOf(Screen.CONNECT)
         private set
@@ -56,7 +60,43 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     var pendingLabel by mutableStateOf("")
     var pendingTool by mutableStateOf(prefs.getString("pendTool", "") ?: "")
     var pendingTarget by mutableStateOf(prefs.getString("pendTarget", "") ?: "")
-    var pendingTargetDistance by mutableStateOf(prefs.getString("pendTargetDist", "") ?: "")
+    var pendingTargetDistVal by mutableStateOf(prefs.getString("pendTdVal", "") ?: "")
+    var pendingTargetDistUnit by mutableStateOf(prefs.getString("pendTdUnit", "in") ?: "in")
+
+    // ------------------------------------------------- session folder & photos
+
+    /** Asked once per app launch: keep the previous test folder or start fresh. */
+    var sessionPrompt by mutableStateOf(session.lastSessionName() != null)
+        private set
+    val sessionName: String? get() = session.lastSessionName()
+
+    fun chooseContinueSession() { sessionPrompt = false }
+    fun chooseNewSession() { session.startNew(); sessionPrompt = false }
+
+    /** "setup" or "after" while the photo dialog is showing. */
+    var photoPrompt by mutableStateOf<String?>(null)
+        private set
+    var photoCount by mutableStateOf(0)
+        private set
+
+    private fun promptPhotos(kind: String) { photoPrompt = kind; photoCount = 0 }
+    fun dismissPhotoPrompt() { photoPrompt = null }
+
+    /** Create the next photo file inside the right shot folder. */
+    fun newPhotoFile(): Pair<File, Uri>? {
+        val kind = photoPrompt ?: return null
+        val dir = if (kind == "setup") session.folderForSetupPhoto()
+        else session.folderForAfterPhoto()
+        dir.mkdirs()
+        val f = File(dir, "${kind}_${System.currentTimeMillis()}.jpg")
+        val app = getApplication<Application>()
+        val uri = FileProvider.getUriForFile(app, app.packageName + ".fileprovider", f)
+        return f to uri
+    }
+
+    fun photoSaved(ok: Boolean, file: File) {
+        if (ok) photoCount++ else file.delete()
+    }
 
     // The distance is kept exactly as the user typed it, in their chosen unit.
     // Converting to meters and back would turn "12 in" into 11.999… on screen.
@@ -156,15 +196,19 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
                     epochMillis = if (r.epochSec > 0) r.epochSec * 1000L else null,
                     tool = pendingTool.trim(),
                     target = pendingTarget.trim(),
-                    targetDistance = pendingTargetDistance.trim(),
+                    targetDistValue = pendingTargetDistVal.replace(',', '.').toDoubleOrNull(),
+                    targetDistUnit = pendingTargetDistUnit,
                 )
             )
             persist()
             prefs.edit()
                 .putString("pendTool", pendingTool)
                 .putString("pendTarget", pendingTarget)
-                .putString("pendTargetDist", pendingTargetDistance)
+                .putString("pendTdVal", pendingTargetDistVal)
+                .putString("pendTdUnit", pendingTargetDistUnit)
                 .apply()
+            session.logShot(shotJson(results[0]))
+            promptPhotos("after")
             // A real shot destroys both break-screens: force re-verify (and the
             // retest flow re-measures the fresh screen's load automatically).
             setSensorReady(1, false)
@@ -179,7 +223,8 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         label: String,
         tool: String,
         target: String,
-        targetDistance: String,
+        targetDistValue: Double?,
+        targetDistUnit: String,
         outcome: String,
         epochMillis: Long?,
     ) {
@@ -190,12 +235,63 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
             label = label,
             tool = tool,
             target = target,
-            targetDistance = targetDistance,
+            targetDistValue = targetDistValue,
+            targetDistUnit = targetDistUnit,
             outcome = outcome,
             epochMillis = epochMillis ?: r.epochMillis,
         )
         persist()
     }
+
+    /** Log a shot with no chronograph connected — velocity typed in (or blank). */
+    fun addManualEntry(
+        label: String,
+        tool: String,
+        target: String,
+        targetDistValue: Double?,
+        targetDistUnit: String,
+        outcome: String,
+        velocity: Double?,
+        velocityIsFps: Boolean,
+        epochMillis: Long?,
+    ) {
+        val mps = velocity?.let { if (velocityIsFps) it / 3.28084 else it }
+        val rec = TestResult(
+            uid = UUID.randomUUID().toString(),
+            deviceResultId = -1,
+            splitNs = 0,
+            distanceM = 0.0,
+            label = label.trim(),
+            epochMillis = epochMillis,
+            tool = tool.trim(),
+            target = target.trim(),
+            targetDistValue = targetDistValue,
+            targetDistUnit = targetDistUnit,
+            outcome = outcome.trim(),
+            manualVelocityMps = mps,
+        )
+        results.add(0, rec)
+        persist()
+        session.logShot(shotJson(rec))
+        promptPhotos("after")
+    }
+
+    /** The per-shot log file written into the shot's folder. */
+    private fun shotJson(r: TestResult): JSONObject = JSONObject()
+        .put("uid", r.uid)
+        .put("source", if (r.isManual) "manual" else "device")
+        .put("label", r.label)
+        .put("tool", r.tool)
+        .put("target", r.target)
+        .put("targetDistUnit", r.targetDistUnit)
+        .put("outcome", r.outcome)
+        .put("splitNs", r.splitNs)
+        .put("distanceM", r.distanceM)
+        .put("velocityMps", r.metersPerSecond)
+        .put("velocityFps", r.feetPerSecond)
+        .put("ciPercent", ciPercentFor(r))
+        .put("epochMillis", r.epochMillis ?: -1L)
+        .apply { r.targetDistValue?.let { put("targetDistValue", it) } }
 
     fun deleteResult(uid: String) {
         results.removeAll { it.uid == uid }
@@ -315,8 +411,11 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         ble.sendCommand(Proto.CMD_VERIFY2)
     }
 
+    private var inWizard = false
+
     fun continueToDistance() {
         ble.sendCommand(Proto.CMD_CANCEL)
+        inWizard = true
         screen = Screen.DISTANCE
     }
 
@@ -330,6 +429,10 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
             .putBoolean("setupDone", true)
             .apply()
         screen = Screen.DASHBOARD
+        if (inWizard) {
+            inWizard = false
+            promptPhotos("setup")   // capture the rig as it stands for this test
+        }
     }
 
     /** Distance expressed in the user's chosen unit, for display/editing. */
@@ -355,7 +458,22 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     fun syncTime() = ble.syncTime()
 
     fun changeDistance() {
+        inWizard = false
         screen = Screen.DISTANCE
+    }
+
+    /** Manual logging without any chronograph — straight to the dashboard. */
+    fun enterManualMode() {
+        screen = Screen.DASHBOARD
+    }
+
+    /** TopBar action: disconnect if connected, otherwise leave the dashboard. */
+    fun disconnectOrExit() {
+        if (ble.connState.value == ConnState.DISCONNECTED) {
+            screen = Screen.CONNECT
+        } else {
+            ble.disconnect()
+        }
     }
 
     /** Re-run the whole wizard, including a fresh bare-port baseline. */

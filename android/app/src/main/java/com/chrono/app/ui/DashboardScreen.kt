@@ -1,5 +1,7 @@
 package com.chrono.app.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -22,6 +24,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
@@ -29,7 +32,11 @@ import androidx.compose.material.icons.filled.BluetoothConnected
 import androidx.compose.material.icons.filled.BluetoothDisabled
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -52,12 +59,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -66,7 +77,9 @@ import com.chrono.app.ble.ConnState
 import com.chrono.app.ble.DeviceStatus
 import com.chrono.app.ble.Proto
 import com.chrono.app.data.Exporter
+import com.chrono.app.data.TARGET_DIST_UNITS
 import com.chrono.app.data.TestResult
+import java.io.File
 import com.chrono.app.ui.theme.Amber
 import com.chrono.app.ui.theme.Bad
 import com.chrono.app.ui.theme.Good
@@ -111,7 +124,14 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
     val armed = state == Proto.ST_ARMED
     val running = state == Proto.ST_RUNNING
     var editing by remember { mutableStateOf<TestResult?>(null) }
+    var manualEntry by remember { mutableStateOf(false) }
     val context = LocalContext.current
+
+    // System camera via FileProvider URI: no CAMERA permission required.
+    var pendingPhoto by remember { mutableStateOf<File?>(null) }
+    val takePicture = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicture()
+    ) { ok -> pendingPhoto?.let { vm.photoSaved(ok, it) }; pendingPhoto = null }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -167,6 +187,17 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                 onArm = { vm.arm() },
                 onDisarm = { vm.disarm() },
             )
+        }
+
+        item {
+            OutlinedButton(
+                onClick = { manualEntry = true },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+            ) {
+                Icon(Icons.Filled.EditNote, null, tint = TextDim, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.size(8.dp))
+                Text("Log manual entry (no chrono)", color = TextDim)
+            }
         }
 
         if (vm.results.isNotEmpty()) {
@@ -227,13 +258,70 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
         EditResultDialog(
             result = r,
             onDismiss = { editing = null },
-            onSave = { label, tool, target, targetDistance, outcome, epochMillis ->
-                vm.updateResult(r.uid, label, tool, target, targetDistance, outcome, epochMillis)
+            onSave = { label, tool, target, tdVal, tdUnit, outcome, epochMillis ->
+                vm.updateResult(r.uid, label, tool, target, tdVal, tdUnit, outcome, epochMillis)
                 editing = null
             },
             onDelete = {
                 vm.deleteResult(r.uid)
                 editing = null
+            },
+        )
+    }
+
+    if (manualEntry) {
+        ManualEntryDialog(
+            vm = vm,
+            onDismiss = { manualEntry = false },
+            onSave = { label, tool, target, tdVal, tdUnit, outcome, vel, velFps, epoch ->
+                vm.addManualEntry(label, tool, target, tdVal, tdUnit, outcome, vel, velFps, epoch)
+                manualEntry = false
+            },
+        )
+    }
+
+    // Photo prompts: after setup, and after each recorded shot.
+    vm.photoPrompt?.let { kind ->
+        AlertDialog(
+            onDismissRequest = { vm.dismissPhotoPrompt() },
+            title = { Text(if (kind == "setup") "Setup photos" else "After photos") },
+            text = {
+                Column {
+                    Text(
+                        if (kind == "setup")
+                            "Photograph your rig as it stands for this test — sensor " +
+                                "placement, spacing, tool. Saved to this shot's folder."
+                        else
+                            "Photograph the target and anything notable about the " +
+                                "outcome. Saved with this shot's log.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    if (vm.photoCount > 0) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "${vm.photoCount} photo${if (vm.photoCount == 1) "" else "s"} saved",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Good,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.newPhotoFile()?.let { (file, uri) ->
+                        pendingPhoto = file
+                        runCatching { takePicture.launch(uri) }
+                    }
+                }) {
+                    Icon(Icons.Filled.PhotoCamera, null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.size(6.dp))
+                    Text(if (vm.photoCount == 0) "Take photo" else "Take another")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.dismissPhotoPrompt() }) {
+                    Text(if (vm.photoCount == 0) "Skip" else "Done")
+                }
             },
         )
     }
@@ -285,8 +373,20 @@ private fun TopBar(vm: ChronoViewModel, connState: ConnState, deviceStatus: Devi
                     modifier = Modifier.clickable { vm.syncTime() },
                 )
             }
+            vm.sessionName?.let {
+                Text(
+                    "Folder: $it",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextDim,
+                )
+            }
         }
-        TextButton(onClick = { vm.disconnect() }) { Text("Disconnect", color = TextDim) }
+        TextButton(onClick = { vm.disconnectOrExit() }) {
+            Text(
+                if (connState == ConnState.DISCONNECTED) "Exit" else "Disconnect",
+                color = TextDim,
+            )
+        }
     }
 }
 
@@ -508,7 +608,7 @@ private fun NextTestCard(vm: ChronoViewModel, armed: Boolean) {
                 onValueChange = { vm.pendingLabel = it },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("Label") },
-                placeholder = { Text(".22 pellet, spring #3", color = TextDim) },
+                placeholder = { Text("20 degree upward angle, (any special notes)", color = TextDim) },
                 textStyle = fieldText,
                 singleLine = true,
             )
@@ -518,7 +618,7 @@ private fun NextTestCard(vm: ChronoViewModel, armed: Boolean) {
                 onValueChange = { vm.pendingTool = it },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("Tool") },
-                placeholder = { Text("launcher / gun / device", color = TextDim) },
+                placeholder = { Text("PAN BK40, Hydrajet C2, etc.", color = TextDim) },
                 textStyle = fieldText,
                 singleLine = true,
             )
@@ -527,20 +627,25 @@ private fun NextTestCard(vm: ChronoViewModel, armed: Boolean) {
                 OutlinedTextField(
                     value = vm.pendingTarget,
                     onValueChange = { vm.pendingTarget = it },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1.2f),
                     label = { Text("Target") },
+                    placeholder = { Text("Ammo Can etc.", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
                 )
                 Spacer(Modifier.size(8.dp))
                 OutlinedTextField(
-                    value = vm.pendingTargetDistance,
-                    onValueChange = { vm.pendingTargetDistance = it },
-                    modifier = Modifier.weight(1f),
+                    value = vm.pendingTargetDistVal,
+                    onValueChange = { vm.pendingTargetDistVal = it },
+                    modifier = Modifier.weight(0.8f),
                     label = { Text("Dist. to target") },
-                    placeholder = { Text("25 yd", color = TextDim) },
+                    placeholder = { Text("25", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    trailingIcon = {
+                        UnitSelector(vm.pendingTargetDistUnit) { vm.pendingTargetDistUnit = it }
+                    },
                 )
             }
         }
@@ -658,7 +763,7 @@ private fun ResultCard(r: TestResult, latest: Boolean, ciPercent: Double, onEdit
             Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
-                    "%.1f".format(r.feetPerSecond),
+                    if (r.metersPerSecond > 0) "%.1f".format(r.feetPerSecond) else "—",
                     fontFamily = FontFamily.Monospace,
                     fontSize = 40.sp,
                     color = Amber,
@@ -667,28 +772,38 @@ private fun ResultCard(r: TestResult, latest: Boolean, ciPercent: Double, onEdit
                 Text("ft/s", color = TextDim, modifier = Modifier.padding(bottom = 6.dp))
                 Spacer(Modifier.size(18.dp))
                 Column(modifier = Modifier.padding(bottom = 4.dp)) {
-                    Text(
-                        "%.2f m/s".format(r.metersPerSecond),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextDim,
-                    )
-                    Text(
-                        "%.3f ms split".format(r.splitMillis),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextDim,
-                    )
-                    Text(
-                        if (ciPercent >= 0.05) "±%.1f%% (95%% CI)".format(ciPercent)
-                        else "±<0.1% (95% CI)",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextDim,
-                    )
+                    if (r.metersPerSecond > 0) {
+                        Text(
+                            "%.2f m/s".format(r.metersPerSecond),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextDim,
+                        )
+                    }
+                    if (r.isManual) {
+                        Text(
+                            "manual entry",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Teal,
+                        )
+                    } else {
+                        Text(
+                            "%.3f ms split".format(r.splitMillis),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextDim,
+                        )
+                        Text(
+                            if (ciPercent >= 0.05) "±%.1f%% (95%% CI)".format(ciPercent)
+                            else "±<0.1% (95% CI)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextDim,
+                        )
+                    }
                 }
             }
             val meta = listOfNotNull(
                 r.tool.takeIf { it.isNotBlank() }?.let { "Tool: $it" },
                 r.target.takeIf { it.isNotBlank() }?.let { "Target: $it" },
-                r.targetDistance.takeIf { it.isNotBlank() }?.let { "@ $it" },
+                r.targetDistanceText()?.let { "@ $it" },
             ).joinToString("  ·  ")
             if (meta.isNotEmpty()) {
                 Spacer(Modifier.height(6.dp))
@@ -717,37 +832,95 @@ private fun ResultCard(r: TestResult, latest: Boolean, ciPercent: Double, onEdit
 
 private val EDIT_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
+/** Tap-to-open unit picker, used as a trailing icon inside distance fields. */
+@Composable
+private fun UnitSelector(unit: String, onSelect: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { open = true }) { Text(unit, color = Teal) }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            TARGET_DIST_UNITS.forEach { u ->
+                DropdownMenuItem(text = { Text(u) }, onClick = { onSelect(u); open = false })
+            }
+        }
+    }
+}
+
+/**
+ * Date/time entry that helps instead of nagging: clicking the empty box
+ * autofills the current date and pre-selects the time digits so the user can
+ * immediately type over them.
+ */
+@Composable
+private fun DateTimeField(
+    field: TextFieldValue,
+    onChange: (TextFieldValue) -> Unit,
+    isError: Boolean,
+    supporting: String?,
+) {
+    OutlinedTextField(
+        value = field,
+        onValueChange = onChange,
+        label = { Text("Date & time") },
+        placeholder = { Text("tap to fill current time", color = TextDim) },
+        textStyle = MaterialTheme.typography.bodyMedium,
+        singleLine = true,
+        isError = isError,
+        supportingText = {
+            if (isError) Text("Use format 2026-07-05 14:30")
+            else if (supporting != null) Text(supporting, color = TextDim)
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .onFocusChanged { st ->
+                if (st.isFocused && field.text.isBlank()) {
+                    val now = EDIT_DATE_FORMAT.format(LocalDateTime.now())
+                    onChange(TextFieldValue(now, selection = TextRange(11, 16)))
+                }
+            },
+    )
+}
+
+private fun parseDateField(text: String): Long? =
+    text.trim().takeIf { it.isNotEmpty() }?.let {
+        runCatching {
+            LocalDateTime.parse(it, EDIT_DATE_FORMAT)
+                .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        }.getOrNull()
+    }
+
 @Composable
 private fun EditResultDialog(
     result: TestResult,
     onDismiss: () -> Unit,
     onSave: (
         label: String, tool: String, target: String,
-        targetDistance: String, outcome: String, epochMillis: Long?,
+        targetDistValue: Double?, targetDistUnit: String,
+        outcome: String, epochMillis: Long?,
     ) -> Unit,
     onDelete: () -> Unit,
 ) {
     var label by remember { mutableStateOf(result.label) }
     var tool by remember { mutableStateOf(result.tool) }
     var target by remember { mutableStateOf(result.target) }
-    var targetDistance by remember { mutableStateOf(result.targetDistance) }
+    var tdVal by remember { mutableStateOf(result.targetDistValue?.let { trimZeros(it) } ?: "") }
+    var tdUnit by remember { mutableStateOf(result.targetDistUnit) }
     var outcome by remember { mutableStateOf(result.outcome) }
-    var dateText by remember {
+    var dateField by remember {
         mutableStateOf(
-            result.epochMillis?.let {
-                EDIT_DATE_FORMAT.format(
-                    LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(it), ZoneId.systemDefault())
-                )
-            } ?: ""
+            TextFieldValue(
+                result.epochMillis?.let {
+                    EDIT_DATE_FORMAT.format(
+                        LocalDateTime.ofInstant(
+                            java.time.Instant.ofEpochMilli(it), ZoneId.systemDefault()
+                        )
+                    )
+                } ?: ""
+            )
         )
     }
-    val parsedDate: Long? = dateText.trim().takeIf { it.isNotEmpty() }?.let {
-        runCatching {
-            LocalDateTime.parse(it, EDIT_DATE_FORMAT)
-                .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-        }.getOrNull()
-    }
-    val dateError = dateText.isNotBlank() && parsedDate == null
+    val parsedDate = parseDateField(dateField.text)
+    val dateError = dateField.text.isNotBlank() && parsedDate == null
     val fieldText = MaterialTheme.typography.bodyMedium
 
     AlertDialog(
@@ -759,6 +932,7 @@ private fun EditResultDialog(
                     value = label,
                     onValueChange = { label = it },
                     label = { Text("Label") },
+                    placeholder = { Text("20 degree upward angle, (any special notes)", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -768,6 +942,7 @@ private fun EditResultDialog(
                     value = tool,
                     onValueChange = { tool = it },
                     label = { Text("Tool") },
+                    placeholder = { Text("PAN BK40, Hydrajet C2, etc.", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -778,18 +953,21 @@ private fun EditResultDialog(
                         value = target,
                         onValueChange = { target = it },
                         label = { Text("Target") },
+                        placeholder = { Text("Ammo Can etc.", color = TextDim) },
                         textStyle = fieldText,
                         singleLine = true,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1.2f),
                     )
                     Spacer(Modifier.size(8.dp))
                     OutlinedTextField(
-                        value = targetDistance,
-                        onValueChange = { targetDistance = it },
-                        label = { Text("Dist. to target") },
+                        value = tdVal,
+                        onValueChange = { tdVal = it },
+                        label = { Text("Dist.") },
                         textStyle = fieldText,
                         singleLine = true,
-                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        trailingIcon = { UnitSelector(tdUnit) { tdUnit = it } },
+                        modifier = Modifier.weight(0.8f),
                     )
                 }
                 Spacer(Modifier.height(8.dp))
@@ -802,20 +980,12 @@ private fun EditResultDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = dateText,
-                    onValueChange = { dateText = it },
-                    label = { Text("Date & time") },
-                    placeholder = { Text("yyyy-MM-dd HH:mm", color = TextDim) },
-                    textStyle = fieldText,
-                    singleLine = true,
+                DateTimeField(
+                    field = dateField,
+                    onChange = { dateField = it },
                     isError = dateError,
-                    supportingText = {
-                        if (dateError) Text("Use format 2026-07-05 14:30")
-                        else if (result.epochMillis == null && dateText.isBlank())
-                            Text("Device clock wasn't synced for this test", color = TextDim)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
+                    supporting = if (result.epochMillis == null && dateField.text.isBlank())
+                        "Device clock wasn't synced for this test" else null,
                 )
                 Spacer(Modifier.height(6.dp))
                 TextButton(onClick = onDelete) {
@@ -830,11 +1000,159 @@ private fun EditResultDialog(
                 onClick = {
                     onSave(
                         label.trim(), tool.trim(), target.trim(),
-                        targetDistance.trim(), outcome.trim(), parsedDate,
+                        tdVal.replace(',', '.').toDoubleOrNull(), tdUnit,
+                        outcome.trim(), parsedDate,
                     )
                 },
                 enabled = !dateError,
             ) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
+@Composable
+private fun ManualEntryDialog(
+    vm: ChronoViewModel,
+    onDismiss: () -> Unit,
+    onSave: (
+        label: String, tool: String, target: String,
+        targetDistValue: Double?, targetDistUnit: String, outcome: String,
+        velocity: Double?, velocityIsFps: Boolean, epochMillis: Long?,
+    ) -> Unit,
+) {
+    var label by remember { mutableStateOf(vm.pendingLabel) }
+    var tool by remember { mutableStateOf(vm.pendingTool) }
+    var target by remember { mutableStateOf(vm.pendingTarget) }
+    var tdVal by remember { mutableStateOf(vm.pendingTargetDistVal) }
+    var tdUnit by remember { mutableStateOf(vm.pendingTargetDistUnit) }
+    var outcome by remember { mutableStateOf("") }
+    var velText by remember { mutableStateOf("") }
+    var velIsFps by remember { mutableStateOf(true) }
+    var velUnitOpen by remember { mutableStateOf(false) }
+    var dateField by remember {
+        mutableStateOf(
+            TextFieldValue(
+                EDIT_DATE_FORMAT.format(LocalDateTime.now()),
+                selection = TextRange(11, 16),
+            )
+        )
+    }
+    val parsedDate = parseDateField(dateField.text)
+    val dateError = dateField.text.isNotBlank() && parsedDate == null
+    val fieldText = MaterialTheme.typography.bodyMedium
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Manual entry") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    "Log a shot without a connected chronograph. Velocity is " +
+                        "optional — leave it blank for a notes/photos-only entry.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextDim,
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = velText,
+                    onValueChange = { velText = it },
+                    label = { Text("Velocity (optional)") },
+                    textStyle = fieldText,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    trailingIcon = {
+                        Box {
+                            TextButton(onClick = { velUnitOpen = true }) {
+                                Text(if (velIsFps) "ft/s" else "m/s", color = Teal)
+                            }
+                            DropdownMenu(
+                                expanded = velUnitOpen,
+                                onDismissRequest = { velUnitOpen = false },
+                            ) {
+                                DropdownMenuItem(text = { Text("ft/s") },
+                                    onClick = { velIsFps = true; velUnitOpen = false })
+                                DropdownMenuItem(text = { Text("m/s") },
+                                    onClick = { velIsFps = false; velUnitOpen = false })
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = label,
+                    onValueChange = { label = it },
+                    label = { Text("Label") },
+                    placeholder = { Text("20 degree upward angle, (any special notes)", color = TextDim) },
+                    textStyle = fieldText,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = tool,
+                    onValueChange = { tool = it },
+                    label = { Text("Tool") },
+                    placeholder = { Text("PAN BK40, Hydrajet C2, etc.", color = TextDim) },
+                    textStyle = fieldText,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                Row {
+                    OutlinedTextField(
+                        value = target,
+                        onValueChange = { target = it },
+                        label = { Text("Target") },
+                        placeholder = { Text("Ammo Can etc.", color = TextDim) },
+                        textStyle = fieldText,
+                        singleLine = true,
+                        modifier = Modifier.weight(1.2f),
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    OutlinedTextField(
+                        value = tdVal,
+                        onValueChange = { tdVal = it },
+                        label = { Text("Dist.") },
+                        textStyle = fieldText,
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        trailingIcon = { UnitSelector(tdUnit) { tdUnit = it } },
+                        modifier = Modifier.weight(0.8f),
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = outcome,
+                    onValueChange = { outcome = it },
+                    label = { Text("Result") },
+                    placeholder = { Text("hit / group size / notes", color = TextDim) },
+                    textStyle = fieldText,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                DateTimeField(
+                    field = dateField,
+                    onChange = { dateField = it },
+                    isError = dateError,
+                    supporting = null,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onSave(
+                        label.trim(), tool.trim(), target.trim(),
+                        tdVal.replace(',', '.').toDoubleOrNull(), tdUnit, outcome.trim(),
+                        velText.replace(',', '.').toDoubleOrNull(), velIsFps, parsedDate,
+                    )
+                },
+                enabled = !dateError,
+            ) { Text("Save entry") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }

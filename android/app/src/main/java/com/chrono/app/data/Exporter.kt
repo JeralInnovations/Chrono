@@ -23,15 +23,16 @@ object Exporter {
         val csv = File(dir, "chrono_results_$stamp.csv")
         csv.writeText(buildString {
             appendLine(
-                "label,tool,target,target_distance,result,date_iso," +
+                "label,tool,target,target_dist_value,target_dist_unit,result,source,date_iso," +
                     "split_ns,split_ms,distance_m,velocity_mps,velocity_fps"
             )
             for (r in results) {
                 val date = r.epochMillis?.let { Instant.ofEpochMilli(it).toString() } ?: ""
                 appendLine(
                     esc(r.label) + "," + esc(r.tool) + "," + esc(r.target) + "," +
-                        esc(r.targetDistance) + "," + esc(r.outcome) + "," + date + "," +
-                        r.splitNs + "," +
+                        (r.targetDistValue?.toString() ?: "") + "," + r.targetDistUnit + "," +
+                        esc(r.outcome) + "," + (if (r.isManual) "manual" else "device") + "," +
+                        date + "," + r.splitNs + "," +
                         String.format(Locale.US, "%.6f", r.splitMillis) + "," +
                         String.format(Locale.US, "%.5f", r.distanceM) + "," +
                         String.format(Locale.US, "%.3f", r.metersPerSecond) + "," +
