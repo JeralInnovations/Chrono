@@ -89,8 +89,16 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     var photoCount by mutableStateOf(0)
         private set
 
-    private fun promptPhotos(kind: String) { photoPrompt = kind; photoCount = 0 }
-    fun dismissPhotoPrompt() { photoPrompt = null }
+    // photoPrompt is persisted so a camera-triggered process restart resumes
+    // the photo step instead of losing it.
+    private fun promptPhotos(kind: String) {
+        photoPrompt = kind; photoCount = 0
+        prefs.edit().putString("photoPrompt", kind).apply()
+    }
+    fun dismissPhotoPrompt() {
+        photoPrompt = null
+        prefs.edit().remove("photoPrompt").apply()
+    }
 
     /** Create the next photo target inside the right test folder. */
     fun newPhotoUri(): Uri? {
@@ -177,8 +185,11 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
             var prev = ConnState.DISCONNECTED
             ble.connState.collect { cs ->
                 when (cs) {
-                    ConnState.CONNECTED -> if (screen == Screen.CONNECT) {
-                        screen = if (setupDone) Screen.DASHBOARD else Screen.BASELINE
+                    ConnState.CONNECTED -> {
+                        setUiMode(if (ble.isSimulation) "sim" else "real")
+                        if (screen == Screen.CONNECT) {
+                            screen = if (setupDone) Screen.DASHBOARD else Screen.BASELINE
+                        }
                     }
                     ConnState.DISCONNECTED ->
                         // Leave the dashboard only when a real device session
@@ -187,6 +198,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
                         if (prev == ConnState.CONNECTED || prev == ConnState.RECONNECTING ||
                             prev == ConnState.CONNECTING
                         ) {
+                            setUiMode("")
                             screen = Screen.CONNECT
                             retestSensor = null
                         }
@@ -194,6 +206,14 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 prev = cs
             }
+        }
+
+        // Restore after a process restart (e.g. camera killed us mid-session).
+        photoPrompt = prefs.getString("photoPrompt", null)
+        when (prefs.getString("uiMode", "")) {
+            "sim" -> ble.connectSimulated()   // collector routes to the right screen
+            "manual" -> screen = Screen.DASHBOARD
+            // "real"/"" : stay on CONNECT; scanning reconnects a real device
         }
     }
 
@@ -545,11 +565,13 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Manual logging without any chronograph — straight to the dashboard. */
     fun enterManualMode() {
+        setUiMode("manual")
         screen = Screen.DASHBOARD
     }
 
     /** TopBar action: disconnect if connected, otherwise leave the dashboard. */
     fun disconnectOrExit() {
+        setUiMode("")
         if (ble.connState.value == ConnState.DISCONNECTED) {
             screen = Screen.CONNECT
         } else {
@@ -562,10 +584,21 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         screen = Screen.BASELINE
     }
 
-    fun disconnect() = ble.disconnect()
+    fun disconnect() {
+        setUiMode("")
+        ble.disconnect()
+    }
 
-    fun connectSimulated() = ble.connectSimulated()
+    fun connectSimulated() {
+        setUiMode("sim")
+        ble.connectSimulated()
+    }
     fun simulateSignalLoss() = ble.simulateSignalLoss()
+
+    // The active mode is persisted so that if Android kills the process while
+    // the external camera is open (common with full-res capture), reopening
+    // the app restores where you were instead of dropping to the scan screen.
+    private fun setUiMode(mode: String) = prefs.edit().putString("uiMode", mode).apply()
 
     override fun onCleared() {
         ble.disconnect()

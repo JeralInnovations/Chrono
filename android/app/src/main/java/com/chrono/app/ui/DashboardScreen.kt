@@ -981,97 +981,82 @@ private fun ResultCard(
             else MaterialTheme.colorScheme.surface
         ),
     ) {
-        Row(Modifier.fillMaxWidth().padding(14.dp)) {
+        Row(Modifier.fillMaxWidth().padding(16.dp)) {
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        r.label.ifBlank { "Untitled test" },
+                        style = MaterialTheme.typography.titleMedium,
+                        color = if (r.label.isBlank()) TextDim else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = onEdit) {
+                        Icon(Icons.Filled.Edit, "Edit", tint = TextDim, modifier = Modifier.size(18.dp))
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        if (r.metersPerSecond > 0) "%.1f".format(r.feetPerSecond) else "—",
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 36.sp,
+                        color = Amber,
+                    )
+                    Spacer(Modifier.size(6.dp))
+                    Text("ft/s", color = TextDim, modifier = Modifier.padding(bottom = 5.dp))
+                }
+                Spacer(Modifier.height(4.dp))
+                val ciText = if (ciPercent >= 0.05) "±%.1f%% CI".format(ciPercent) else "±<0.1% CI"
+                val detail = when {
+                    r.isManual && r.metersPerSecond > 0 ->
+                        "%.2f m/s  ·  manual entry".format(r.metersPerSecond)
+                    r.isManual -> "manual entry"
+                    else -> "%.2f m/s  ·  %.3f ms  ·  %s".format(
+                        r.metersPerSecond, r.splitMillis, ciText
+                    )
+                }
+                Text(
+                    detail,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (r.isManual) Teal else TextDim,
+                )
+                val meta = listOfNotNull(
+                    r.tool.takeIf { it.isNotBlank() }?.let { "Tool: $it" },
+                    r.target.takeIf { it.isNotBlank() }?.let { "Target: $it" },
+                    r.targetDistanceText()?.let { "@ $it" },
+                ).joinToString("  ·  ")
+                if (meta.isNotEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(meta, style = MaterialTheme.typography.bodyMedium, color = TextDim)
+                }
+                if (r.outcome.isNotBlank()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "Result: ${r.outcome}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                val date = r.formattedDate()
+                Text(
+                    date ?: "No date — tap ✎ to set one",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (date != null) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    else TextDim.copy(alpha = 0.55f),
+                )
+            }
             cover?.let { uri ->
+                Spacer(Modifier.size(14.dp))
                 AsyncImage(
                     model = uri,
                     contentDescription = "shot photo",
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
-                        .size(64.dp)
-                        .clip(RoundedCornerShape(10.dp))
+                        .size(96.dp)
+                        .clip(RoundedCornerShape(12.dp))
                         .clickable { onOpenPhoto(uri) },
                 )
-                Spacer(Modifier.size(12.dp))
-            }
-            Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    r.label.ifBlank { "Untitled test" },
-                    style = MaterialTheme.typography.titleMedium,
-                    color = if (r.label.isBlank()) TextDim else MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f),
-                )
-                IconButton(onClick = onEdit) {
-                    Icon(Icons.Filled.Edit, "Edit", tint = TextDim, modifier = Modifier.size(18.dp))
-                }
-            }
-            Spacer(Modifier.height(6.dp))
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    if (r.metersPerSecond > 0) "%.1f".format(r.feetPerSecond) else "—",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 40.sp,
-                    color = Amber,
-                )
-                Spacer(Modifier.size(6.dp))
-                Text("ft/s", color = TextDim, modifier = Modifier.padding(bottom = 6.dp))
-                Spacer(Modifier.size(18.dp))
-                Column(modifier = Modifier.padding(bottom = 4.dp)) {
-                    if (r.metersPerSecond > 0) {
-                        Text(
-                            "%.2f m/s".format(r.metersPerSecond),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextDim,
-                        )
-                    }
-                    if (r.isManual) {
-                        Text(
-                            "manual entry",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Teal,
-                        )
-                    } else {
-                        Text(
-                            "%.3f ms split".format(r.splitMillis),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextDim,
-                        )
-                        Text(
-                            if (ciPercent >= 0.05) "±%.1f%% (95%% CI)".format(ciPercent)
-                            else "±<0.1% (95% CI)",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextDim,
-                        )
-                    }
-                }
-            }
-            val meta = listOfNotNull(
-                r.tool.takeIf { it.isNotBlank() }?.let { "Tool: $it" },
-                r.target.takeIf { it.isNotBlank() }?.let { "Target: $it" },
-                r.targetDistanceText()?.let { "@ $it" },
-            ).joinToString("  ·  ")
-            if (meta.isNotEmpty()) {
-                Spacer(Modifier.height(6.dp))
-                Text(meta, style = MaterialTheme.typography.bodyMedium, color = TextDim)
-            }
-            if (r.outcome.isNotBlank()) {
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    "Result: ${r.outcome}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
-                )
-            }
-            Spacer(Modifier.height(8.dp))
-            val date = r.formattedDate()
-            Text(
-                date ?: "No date — tap ✎ to set one",
-                style = MaterialTheme.typography.bodyMedium,
-                // grayed out when the device had no synced clock for this test
-                color = if (date != null) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                else TextDim.copy(alpha = 0.55f),
-            )
             }
         }
     }
