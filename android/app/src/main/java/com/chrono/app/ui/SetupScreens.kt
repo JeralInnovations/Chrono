@@ -23,11 +23,11 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -201,22 +201,14 @@ fun SensorSetupScreen(
     connState: ConnState,
     onContinue: () -> Unit,
 ) {
-    // Attach first (nothing armed), then the user-acknowledged tap test.
-    var tapStarted by remember(sensor) { mutableStateOf(false) }
-    // Latch: the device wanders through CALIBRATING after the trigger test,
-    // so remember locally that this sensor already passed.
+    // Three explicit, user-driven steps:
+    //   attach   — plug the sensor in (nothing armed)
+    //   measure  — capacitance check vs the bare-port baseline
+    //   tap      — impact/voltage-rise test (a separate check)
+    var step by remember(sensor) { mutableStateOf("attach") }
     var wasVerified by remember(sensor) { mutableStateOf(false) }
-    var calStarted by remember(sensor) { mutableStateOf(false) }
     if (deviceState == (if (sensor == 1) Proto.ST_VERIFY1_OK else Proto.ST_VERIFY2_OK)) {
         wasVerified = true
-    }
-
-    // Once verified, automatically measure the channel with the sensor attached.
-    LaunchedEffect(wasVerified) {
-        if (wasVerified && !calStarted) {
-            calStarted = true
-            vm.startLoadedCal(sensor)
-        }
     }
 
     val loadNs = vm.channelLoadNs(sensor)
@@ -227,97 +219,134 @@ fun SensorSetupScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(20.dp))
+        Text("SETUP  ${sensor + 1}/4", style = MaterialTheme.typography.labelSmall, color = TextDim)
+        Spacer(Modifier.height(8.dp))
         Text(
-            "SETUP  ${sensor + 1}/4",
-            style = MaterialTheme.typography.labelSmall,
-            color = TextDim,
+            "SENSOR $sensor — $role",
+            style = MaterialTheme.typography.labelLarge,
+            color = Amber,
         )
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(16.dp))
 
         if (connState == ConnState.RECONNECTING) {
             ReconnectingBanner()
             Spacer(Modifier.height(16.dp))
         }
 
-        if (!tapStarted && !wasVerified) {
-            // ---- attach step: nothing armed, take your time
-            Text(
-                "SENSOR $sensor — $role",
-                style = MaterialTheme.typography.labelLarge,
-                color = Amber,
-            )
-            Spacer(Modifier.height(20.dp))
-            TerminalGraphic(pulsing = false, verified = false)
-            Spacer(Modifier.height(24.dp))
-            Text(
-                "1.  Press the spring clips and insert the $role sensor leads " +
-                    "into port $sensor.",
-                style = MaterialTheme.typography.bodyLarge,
-                textAlign = TextAlign.Center,
-            )
-            Spacer(Modifier.height(10.dp))
-            Text(
-                "2.  Route and secure the wire. Nothing is armed yet — movement " +
-                    "can't trigger anything.",
-                style = MaterialTheme.typography.bodyLarge,
-                textAlign = TextAlign.Center,
-            )
-            Spacer(Modifier.height(24.dp))
-            Button(
-                onClick = { vm.beginTapTest(sensor); tapStarted = true },
-                modifier = Modifier.fillMaxWidth().height(50.dp),
-            ) { Text("Sensor plugged in — start tap test") }
-        } else {
-            VerifyPane(sensor = sensor, deviceState = deviceState, verifiedOverride = wasVerified)
-            if (vm.isSimulation && !wasVerified) {
-                Spacer(Modifier.height(16.dp))
-                Button(
-                    onClick = { vm.simulateTap() },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Simulate sensor tap") }
-            }
-        }
-
-        if (wasVerified) {
-            Spacer(Modifier.height(16.dp))
-            if (vm.calRunning) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(
-                        color = Amber, modifier = Modifier.size(16.dp), strokeWidth = 2.dp,
-                    )
-                    Spacer(Modifier.size(8.dp))
-                    Text("Measuring channel…", color = TextDim,
-                        style = MaterialTheme.typography.bodyMedium)
-                }
-            } else if (loadNs != null) {
+        when (step) {
+            "attach" -> {
+                TerminalGraphic(pulsing = false, verified = false)
+                Spacer(Modifier.height(24.dp))
                 Text(
-                    "Channel load: +%.2f µs above baseline  (≈ %d pF)".format(
-                        loadNs / 1000.0, (loadNs / 12.0).toInt()
-                    ),
+                    "1.  Press the spring clips and insert the $role sensor leads into port $sensor.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "2.  Route and secure the wire. Nothing is armed — confirm below " +
+                        "once it's in place and you're not touching it.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.height(24.dp))
+                Button(
+                    onClick = { vm.startLoadedCal(sensor); step = "measure" },
+                    modifier = Modifier.fillMaxWidth().height(54.dp),
+                ) { Text("Sensor plugged in — check capacitance") }
+            }
+
+            "measure" -> {
+                Text(
+                    "Capacitance check",
+                    style = MaterialTheme.typography.headlineMedium,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Measuring the port with the sensor attached and comparing to " +
+                        "the empty-port baseline. The wire and sensor should add capacitance.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextDim,
                     textAlign = TextAlign.Center,
                 )
-                if (loadNs < 250) {
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        "That looks like an empty port — is the sensor actually plugged in?",
-                        style = MaterialTheme.typography.bodyMedium,
+                Spacer(Modifier.height(28.dp))
+                if (vm.calRunning) {
+                    CircularProgressIndicator(color = Amber, modifier = Modifier.size(28.dp))
+                    Spacer(Modifier.height(10.dp))
+                    Text("Checking capacitance…", color = TextDim)
+                } else when {
+                    loadNs == null -> Text(
+                        "Couldn't measure — check the connection to the device.",
+                        color = Amber, textAlign = TextAlign.Center,
+                    )
+                    loadNs > 250 -> {
+                        Icon(Icons.Filled.CheckCircle, null, tint = Good, modifier = Modifier.size(48.dp))
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            "Sensor detected: +%.2f µs over baseline (≈ %d pF added).".format(
+                                loadNs / 1000.0, (loadNs / 12.0).toInt()
+                            ),
+                            color = Good,
+                            style = MaterialTheme.typography.bodyLarge,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                    else -> Text(
+                        "No capacitance increase over the empty-port baseline — the " +
+                            "sensor doesn't look attached. Check the clips and re-measure.",
                         color = Amber,
+                        style = MaterialTheme.typography.bodyLarge,
                         textAlign = TextAlign.Center,
                     )
                 }
+                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.height(24.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { vm.startLoadedCal(sensor) },
+                        enabled = !vm.calRunning,
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Re-measure") }
+                    Spacer(Modifier.size(12.dp))
+                    Button(
+                        onClick = { vm.beginTapTest(sensor); step = "tap" },
+                        enabled = !vm.calRunning && loadNs != null,
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Tap test →") }
+                }
             }
-        }
 
-        Spacer(Modifier.weight(1f))
-        Spacer(Modifier.height(24.dp))
-        Button(
-            onClick = onContinue,
-            enabled = wasVerified && !vm.calRunning,
-            modifier = Modifier.fillMaxWidth().height(54.dp),
-        ) {
-            Text(if (sensor == 1) "Continue to sensor 2" else "Continue")
+            else -> {
+                Text(
+                    "Tap test — impact detection",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Firmly tap the sensor once to confirm it produces a voltage rise " +
+                        "on impact.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextDim,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(16.dp))
+                VerifyPane(sensor = sensor, deviceState = deviceState, verifiedOverride = wasVerified)
+                if (vm.isSimulation && !wasVerified) {
+                    Spacer(Modifier.height(16.dp))
+                    Button(
+                        onClick = { vm.simulateTap() },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Simulate sensor tap") }
+                }
+                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.height(24.dp))
+                Button(
+                    onClick = onContinue,
+                    enabled = wasVerified,
+                    modifier = Modifier.fillMaxWidth().height(54.dp),
+                ) { Text(if (sensor == 1) "Continue to sensor 2" else "Continue") }
+            }
         }
     }
 }

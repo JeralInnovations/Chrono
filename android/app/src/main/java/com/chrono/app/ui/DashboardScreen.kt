@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -60,7 +61,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -70,6 +73,9 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import coil.compose.AsyncImage
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -125,6 +131,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
     val running = state == Proto.ST_RUNNING
     var editing by remember { mutableStateOf<TestResult?>(null) }
     var manualEntry by remember { mutableStateOf(false) }
+    var fullscreenPhoto by remember { mutableStateOf<android.net.Uri?>(null) }
     val context = LocalContext.current
 
     // System camera writing straight into the shot folder: no CAMERA permission.
@@ -418,11 +425,40 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                 editing = null
             },
             onAttachPhotos = { uris -> vm.attachPhotosToResult(r.uid, uris) },
+            photosFor = { vm.photosFor(r) },
+            onOpenPhoto = { fullscreenPhoto = it },
             onDelete = {
                 vm.deleteResult(r.uid)
                 editing = null
             },
         )
+    }
+
+    fullscreenPhoto?.let { uri ->
+        Dialog(
+            onDismissRequest = { fullscreenPhoto = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.96f))
+                    .clickable { fullscreenPhoto = null },
+                contentAlignment = Alignment.Center,
+            ) {
+                AsyncImage(
+                    model = uri,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "Tap to close",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.7f),
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp),
+                )
+            }
+        }
     }
 
     if (manualEntry) {
@@ -536,9 +572,9 @@ private fun TopBar(vm: ChronoViewModel, connState: ConnState, deviceStatus: Devi
                     modifier = Modifier.clickable { vm.syncTime() },
                 )
             }
-            vm.sessionName?.let {
+            vm.projectName?.let {
                 Text(
-                    "Folder: ${vm.session.pathLabel} — tap to open",
+                    "${vm.session.pathLabel} — tap to open",
                     style = MaterialTheme.typography.labelSmall,
                     color = TextDim,
                     modifier = Modifier.clickable { vm.openDataFolder() },
@@ -1074,15 +1110,18 @@ private fun EditResultDialog(
         outcome: String, epochMillis: Long?,
     ) -> Unit,
     onAttachPhotos: (List<android.net.Uri>) -> Unit,
+    photosFor: () -> List<android.net.Uri>,
+    onOpenPhoto: (android.net.Uri) -> Unit,
     onDelete: () -> Unit,
 ) {
-    var attachedNow by remember { mutableStateOf(0) }
+    var photoRefresh by remember { mutableStateOf(0) }
+    val photos = remember(photoRefresh) { photosFor() }
     val pickImages = rememberLauncherForActivityResult(
         ActivityResultContracts.GetMultipleContents()
     ) { uris ->
         if (uris.isNotEmpty()) {
             onAttachPhotos(uris)
-            attachedNow += uris.size
+            photoRefresh++
         }
     }
     var label by remember { mutableStateOf(result.label) }
@@ -1170,15 +1209,29 @@ private fun EditResultDialog(
                     supporting = if (result.epochMillis == null && dateField.text.isBlank())
                         "Device clock wasn't synced for this test" else null,
                 )
+                if (photos.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text("Photos", style = MaterialTheme.typography.labelSmall, color = TextDim)
+                    Spacer(Modifier.height(6.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(photos) { uri ->
+                            AsyncImage(
+                                model = uri,
+                                contentDescription = "shot photo",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(72.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { onOpenPhoto(uri) },
+                            )
+                        }
+                    }
+                }
                 Spacer(Modifier.height(6.dp))
                 TextButton(onClick = { pickImages.launch("image/*") }) {
                     Icon(Icons.Filled.PhotoCamera, null, tint = Teal, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.size(6.dp))
-                    Text(
-                        if (attachedNow == 0) "Add photos to this shot"
-                        else "Add photos ($attachedNow added)",
-                        color = Teal,
-                    )
+                    Text("Add photos", color = Teal)
                 }
                 TextButton(onClick = onDelete) {
                     Icon(Icons.Filled.Delete, null, tint = Bad, modifier = Modifier.size(16.dp))

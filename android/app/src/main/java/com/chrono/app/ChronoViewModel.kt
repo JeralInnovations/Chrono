@@ -62,15 +62,17 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     var pendingTargetDistVal by mutableStateOf(prefs.getString("pendTdVal", "") ?: "")
     var pendingTargetDistUnit by mutableStateOf(prefs.getString("pendTdUnit", "in") ?: "in")
 
-    // ------------------------------------------------- session folder & photos
+    // ------------------------------------------------- project folder & photos
 
-    /** Asked once per app launch: keep the previous test folder or start fresh. */
-    var sessionPrompt by mutableStateOf(session.lastSessionName() != null)
+    /** Shown only on a genuinely new day (or first run): name a new project
+     *  folder or keep logging into the previous one. */
+    var projectPrompt by mutableStateOf(session.needsProjectPrompt())
         private set
-    val sessionName: String? get() = session.lastSessionName()
+    val projectName: String? get() = session.projectName
+    fun defaultProjectName(): String = session.today()
 
-    fun chooseContinueSession() { sessionPrompt = false }
-    fun chooseNewSession() { session.startNew(); sessionPrompt = false }
+    fun startProject(name: String) { session.startProject(name); projectPrompt = false }
+    fun keepProject() { session.continueProject(); projectPrompt = false }
 
     /** "setup" or "after" while the photo dialog is showing. */
     var photoPrompt by mutableStateOf<String?>(null)
@@ -81,11 +83,14 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     private fun promptPhotos(kind: String) { photoPrompt = kind; photoCount = 0 }
     fun dismissPhotoPrompt() { photoPrompt = null }
 
-    /** Create the next photo target inside the right shot folder. */
+    /** Create the next photo target inside the right test folder. */
     fun newPhotoUri(): Uri? {
         val kind = photoPrompt ?: return null
-        return session.newPhotoUri(kind)
+        return session.newPhotoUri(kind, pendingLabel.trim())
     }
+
+    /** Image URIs already saved in a result's folder (thumbnails). */
+    fun photosFor(r: TestResult): List<Uri> = session.listPhotos(r.shotFolder)
 
     fun photoSaved(ok: Boolean, uri: Uri) {
         if (ok) photoCount++
@@ -211,7 +216,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
                 targetDistUnit = pendingTargetDistUnit,
             )
             results.add(0, rec)
-            rec.shotFolder = session.logShot(shotJson(rec))
+            rec.shotFolder = session.logShot(rec.label, shotJson(rec))
             persist()
             prefs.edit()
                 .putString("pendTool", pendingTool)
@@ -283,7 +288,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
             manualVelocityMps = mps,
         )
         results.add(0, rec)
-        rec.shotFolder = session.logShot(shotJson(rec))
+        rec.shotFolder = session.logShot(rec.label, shotJson(rec))
         for (uri in photos) session.importPhoto(rec.shotFolder, uri)
         persist()
         promptPhotos("after")

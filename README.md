@@ -151,15 +151,18 @@ The dashboard's **Channel calibration** card shows each port's measured load
 loaded sweep any time (sensors attached, undisturbed). Every sweep is appended
 to `cal_history.jsonl` in the app's private storage for later analysis.
 
-**Test folders, photos, and manual entries.** All field data lives in
-**`Documents/ChronoData/Test_<date>/Shot_NNNN/`** in the phone's public
-storage — visible in any file manager, with `shot.json` (the full log) plus
-that shot's photos in each folder. Tap the folder name at the top of the
-dashboard (or the *Files* button above the results) to open it. On every app
-launch you're asked to keep logging into the previous test folder or start a
-new one. After setup the app prompts for **setup photos** of the rig; after
-each shot you first get a **results screen** listing what just came in, then
-the **after photos** prompt. **Log manual entry** (dashboard, or "Manual
+**Project folders, test subfolders, photos.** Field data lives in the phone's
+public storage under **`Documents/ChronoData/<project>/<test>/`** — browsable
+in any file manager. The **project** folder is per day, named by date (you can
+rename it when it's created); a **new day** prompts you to start a new project
+or keep logging into the previous one — it does *not* prompt after every shot.
+Each **test** is a subfolder named by that shot's label (or `Test1`, `Test2`…
+auto-incrementing when no label is given), holding `shot.json` plus the shot's
+photos. Tap the folder path at the top of the dashboard (or the *Files* button
+above the results) to open it. After setup the app prompts for **setup photos**
+of the rig; after each shot you first get a **results screen**, then the
+**after photos** prompt. Opening a past shot in the editor shows a row of photo
+thumbnails — tap one for a full-screen view, tap again to close. **Log manual entry** (dashboard, or "Manual
 logging" on the connect screen — a simplified, device-free view) records a
 shot with no chronograph: typed velocity (ft/s or m/s, optional), all detail
 blanks, date/time, and the same photo prompts. Tapping an empty date box
