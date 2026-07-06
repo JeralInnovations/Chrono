@@ -197,7 +197,7 @@ class ChronoBle(private val context: Context) {
     private var simPending = 0
     private var simTimeValid = false
     private var simNextId = 1
-    private val simCalCount = intArrayOf(0, 0)
+    private var simBarePhase = true
 
     fun connectSimulated() {
         stopScan()
@@ -205,9 +205,8 @@ class ChronoBle(private val context: Context) {
         simState = Proto.ST_IDLE
         simPending = 0
         simTimeValid = false
-        simCalCount[0] = 0
-        simCalCount[1] = 0
-        hwInfo.value = HwInfo(1, 1, 3, 62_500, 30, 300)   // pretends to be rev 1
+        simBarePhase = true
+        hwInfo.value = HwInfo(1, 1, 4, 62_500, 30, 300)   // pretends to be rev 1
         pushSimStatus()
         connState.value = ConnState.CONNECTED
     }
@@ -242,19 +241,23 @@ class ChronoBle(private val context: Context) {
         }
     }
 
-    /** First sweep per channel plays the bare port; later sweeps play loaded. */
+    /**
+     * The app tells the sim whether the upcoming sweep is a bare-port baseline
+     * or a loaded (sensor-attached) measurement, so the loaded value is always
+     * higher than the baseline regardless of how many times setup is redone.
+     */
+    fun setSimCalPhase(bare: Boolean) { simBarePhase = bare }
+
     private fun simCalibrate(channel: Int) {
         if (channel !in 1..2) return
+        val bare = simBarePhase
         simScope.launch {
             val prev = simState
             simState = Proto.ST_CALIBRATING
             pushSimStatus()
             delay(900)
-            val idx = channel - 1
-            val bare = simCalCount[idx] == 0
-            simCalCount[idx]++
-            val base = if (bare) 420L + channel * 25L else 4600L + channel * 240L
-            val median = base + (-30L..30L).random()
+            val base = if (bare) 430L + channel * 25L else 4600L + channel * 240L
+            val median = base + (-25L..25L).random()
             cal.tryEmit(
                 CalReading(
                     channel = channel, status = 0, samples = 64,

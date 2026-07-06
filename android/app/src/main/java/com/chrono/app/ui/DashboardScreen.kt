@@ -131,7 +131,8 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
     val running = state == Proto.ST_RUNNING
     var editing by remember { mutableStateOf<TestResult?>(null) }
     var manualEntry by remember { mutableStateOf(false) }
-    var fullscreenPhoto by remember { mutableStateOf<android.net.Uri?>(null) }
+    // (photo uri, owning result uid) so the viewer can offer "set as cover"
+    var fullscreenPhoto by remember { mutableStateOf<Pair<android.net.Uri, String>?>(null) }
     val context = LocalContext.current
 
     // System camera writing straight into the shot folder: no CAMERA permission.
@@ -269,7 +270,9 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                     r,
                     latest = r == vm.results.firstOrNull(),
                     ciPercent = vm.ciPercentFor(r),
+                    coverFor = { vm.photosFor(r) },
                     onEdit = { editing = r },
+                    onOpenPhoto = { fullscreenPhoto = it to r.uid },
                 )
             }
         }
@@ -426,7 +429,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
             },
             onAttachPhotos = { uris -> vm.attachPhotosToResult(r.uid, uris) },
             photosFor = { vm.photosFor(r) },
-            onOpenPhoto = { fullscreenPhoto = it },
+            onOpenPhoto = { fullscreenPhoto = it to r.uid },
             onDelete = {
                 vm.deleteResult(r.uid)
                 editing = null
@@ -434,7 +437,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
         )
     }
 
-    fullscreenPhoto?.let { uri ->
+    fullscreenPhoto?.let { (uri, uid) ->
         Dialog(
             onDismissRequest = { fullscreenPhoto = null },
             properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -451,12 +454,21 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                     contentDescription = null,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Text(
-                    "Tap to close",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White.copy(alpha = 0.7f),
+                Column(
                     modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp),
-                )
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    OutlinedButton(onClick = {
+                        vm.setResultThumbnail(uid, uri.toString())
+                        fullscreenPhoto = null
+                    }) { Text("Set as shot thumbnail") }
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "Tap image to close",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White.copy(alpha = 0.7f),
+                    )
+                }
             }
         }
     }
@@ -945,14 +957,44 @@ private fun ArmButton(
 }
 
 @Composable
-private fun ResultCard(r: TestResult, latest: Boolean, ciPercent: Double, onEdit: () -> Unit) {
+private fun ResultCard(
+    r: TestResult,
+    latest: Boolean,
+    ciPercent: Double,
+    coverFor: () -> List<android.net.Uri>,
+    onEdit: () -> Unit,
+    onOpenPhoto: (android.net.Uri) -> Unit,
+) {
+    // Resolve the cover image off the main thread: chosen thumbnail, else first photo.
+    val cover by androidx.compose.runtime.produceState<android.net.Uri?>(
+        null, r.uid, r.thumbnailUri, r.shotFolder,
+    ) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            r.thumbnailUri.takeIf { it.isNotBlank() }
+                ?.let { runCatching { android.net.Uri.parse(it) }.getOrNull() }
+                ?: coverFor().firstOrNull()
+        }
+    }
     Card(
         colors = CardDefaults.cardColors(
             containerColor = if (latest) MaterialTheme.colorScheme.surfaceVariant
             else MaterialTheme.colorScheme.surface
         ),
     ) {
-        Column(Modifier.fillMaxWidth().padding(18.dp)) {
+        Row(Modifier.fillMaxWidth().padding(14.dp)) {
+            cover?.let { uri ->
+                AsyncImage(
+                    model = uri,
+                    contentDescription = "shot photo",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onOpenPhoto(uri) },
+                )
+                Spacer(Modifier.size(12.dp))
+            }
+            Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     r.label.ifBlank { "Untitled test" },
@@ -1030,6 +1072,7 @@ private fun ResultCard(r: TestResult, latest: Boolean, ciPercent: Double, onEdit
                 color = if (date != null) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                 else TextDim.copy(alpha = 0.55f),
             )
+            }
         }
     }
 }
@@ -1197,7 +1240,7 @@ private fun EditResultDialog(
                     value = outcome,
                     onValueChange = { outcome = it },
                     label = { Text("Result") },
-                    placeholder = { Text("hit / group size / notes", color = TextDim) },
+                    placeholder = { Text("penetration, depth, dent etc.", color = TextDim) },
                     textStyle = fieldText,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -1377,7 +1420,7 @@ private fun ManualEntryDialog(
                     value = outcome,
                     onValueChange = { outcome = it },
                     label = { Text("Result") },
-                    placeholder = { Text("hit / group size / notes", color = TextDim) },
+                    placeholder = { Text("penetration, depth, dent etc.", color = TextDim) },
                     textStyle = fieldText,
                     modifier = Modifier.fillMaxWidth(),
                 )

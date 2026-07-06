@@ -56,7 +56,8 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Details applied to the next test; all editable on the result afterwards.
      *  Tool/target fields persist across sessions (they rarely change mid-range-day). */
-    var pendingLabel by mutableStateOf("")
+    // Auto-fills Test1, Test2, … per project; the user can override it.
+    var pendingLabel by mutableStateOf(session.suggestedLabel())
     var pendingTool by mutableStateOf(prefs.getString("pendTool", "") ?: "")
     var pendingTarget by mutableStateOf(prefs.getString("pendTarget", "") ?: "")
     var pendingTargetDistVal by mutableStateOf(prefs.getString("pendTdVal", "") ?: "")
@@ -71,8 +72,16 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     val projectName: String? get() = session.projectName
     fun defaultProjectName(): String = session.today()
 
-    fun startProject(name: String) { session.startProject(name); projectPrompt = false }
-    fun keepProject() { session.continueProject(); projectPrompt = false }
+    fun startProject(name: String) {
+        session.startProject(name)
+        pendingLabel = session.suggestedLabel()
+        projectPrompt = false
+    }
+    fun keepProject() {
+        session.continueProject()
+        pendingLabel = session.suggestedLabel()
+        projectPrompt = false
+    }
 
     /** "setup" or "after" while the photo dialog is showing. */
     var photoPrompt by mutableStateOf<String?>(null)
@@ -224,6 +233,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
                 .putString("pendTdVal", pendingTargetDistVal)
                 .putString("pendTdUnit", pendingTargetDistUnit)
                 .apply()
+            pendingLabel = session.suggestedLabel()   // Test2, Test3, …
             newShots.add(rec)   // review dialog first; photos prompt on dismiss
             // A real shot destroys both break-screens: force re-verify (and the
             // sensor-attach flow re-measures the fresh screen's load).
@@ -291,7 +301,15 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         rec.shotFolder = session.logShot(rec.label, shotJson(rec))
         for (uri in photos) session.importPhoto(rec.shotFolder, uri)
         persist()
+        pendingLabel = session.suggestedLabel()
         promptPhotos("after")
+    }
+
+    fun setResultThumbnail(uid: String, uri: String) {
+        val idx = results.indexOfFirst { it.uid == uid }
+        if (idx < 0) return
+        results[idx] = results[idx].copy(thumbnailUri = uri)
+        persist()
     }
 
     /** Copy user-picked images into a result's shot folder (edit dialog). */
@@ -372,9 +390,20 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun startBaselineCal() = enqueueCal(listOf(1 to CalPhase.BARE, 2 to CalPhase.BARE))
-    fun startLoadedCal(channel: Int) = enqueueCal(listOf(channel to CalPhase.LOADED))
-    fun recalibrateChannels() = enqueueCal(listOf(1 to CalPhase.LOADED, 2 to CalPhase.LOADED))
+    fun startBaselineCal() {
+        ble.setSimCalPhase(true)
+        enqueueCal(listOf(1 to CalPhase.BARE, 2 to CalPhase.BARE))
+    }
+
+    fun startLoadedCal(channel: Int) {
+        ble.setSimCalPhase(false)
+        enqueueCal(listOf(channel to CalPhase.LOADED))
+    }
+
+    fun recalibrateChannels() {
+        ble.setSimCalPhase(false)
+        enqueueCal(listOf(1 to CalPhase.LOADED, 2 to CalPhase.LOADED))
+    }
 
     /** Raw engineering log, one JSON line per sweep, for later analysis. */
     private fun appendCalHistory(key: String, r: CalReading) {

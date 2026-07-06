@@ -52,6 +52,9 @@ class SessionManager(private val context: Context) {
     /** Prompt for a project only on a genuinely new day (or first run). */
     fun needsProjectPrompt(): Boolean = projectName == null || projectDay != today()
 
+    /** Default label for the next test: Test1, Test2, … within this project. */
+    fun suggestedLabel(): String = "Test${testCounter + 1}"
+
     val pathLabel: String get() = "Documents/ChronoData/${projectName ?: ""}"
 
     fun startProject(name: String) {

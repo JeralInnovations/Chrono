@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -238,14 +239,8 @@ fun SensorSetupScreen(
                 TerminalGraphic(pulsing = false, verified = false)
                 Spacer(Modifier.height(24.dp))
                 Text(
-                    "1.  Press the spring clips and insert the $role sensor leads into port $sensor.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    "2.  Route and secure the wire. Nothing is armed — confirm below " +
-                        "once it's in place and you're not touching it.",
+                    "Press the spring clips and insert the $role sensor leads into " +
+                        "port $sensor. Nothing is armed — take your time.",
                     style = MaterialTheme.typography.bodyLarge,
                     textAlign = TextAlign.Center,
                 )
@@ -253,8 +248,14 @@ fun SensorSetupScreen(
                 Spacer(Modifier.height(24.dp))
                 Button(
                     onClick = { vm.startLoadedCal(sensor); step = "measure" },
-                    modifier = Modifier.fillMaxWidth().height(54.dp),
-                ) { Text("Sensor plugged in — check capacitance") }
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp),
+                ) {
+                    Text(
+                        "Sensor plugged in — check capacitance",
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
 
             "measure" -> {
