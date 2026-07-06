@@ -151,6 +151,19 @@ The dashboard's **Channel calibration** card shows each port's measured load
 loaded sweep any time (sensors attached, undisturbed). Every sweep is appended
 to `cal_history.jsonl` in the app's private storage for later analysis.
 
+**Exporting data.** The *Export* button above the results list shares a CSV of
+every result (label, date, split, distance, velocities) plus the raw
+calibration history (`.jsonl`) through Android's share sheet — email it,
+save to Drive, etc.
+
+**Hardware identification & confidence.** The device reports its hardware
+revision and timing spec (timer tick, crystal tolerance, front-end jitter)
+over BLE, and each result shows a ~95% confidence interval computed from
+those numbers plus your rig's measured channel mismatch and a 0.5 mm
+gate-spacing assumption. A future hardware revision that reports tighter
+numbers (e.g. a TDC front end) automatically shows tighter confidence — no
+app update needed. Unidentified (older) firmware is assumed to be rev 1.
+
 **Break-screens are consumable.** Every recorded shot automatically marks both
 sensors as consumed on the dashboard's rig diagram (torn amber screens) and
 disables ARM. Fit fresh wire, tap the torn sensor in the diagram to retest it —
@@ -178,8 +191,10 @@ Each result shows **ft/s**, **m/s**, and the raw **split in milliseconds**
 
 ## 4a. Simulation mode (no hardware needed)
 
-At the bottom of the connect screen, tap **"Try it without a device (simulation)"**
-to walk the entire UI with no chronograph present — handy for demos or trying the
+Simulation never requires Bluetooth or its permission: if the permission
+screen appears, tap **"Continue in simulation mode"**; otherwise use the
+**"Simulation mode — no hardware needed"** button at the bottom of the connect
+screen. Either way you can walk the entire UI with no chronograph present — handy for demos or trying the
 app before the hardware is built. A fake device drives the same screens the real
 one does: the sensor-verify steps auto-acknowledge after a moment, **ARM** produces
 a realistic randomized shot for the configured gap, time-sync works, and a **"Drop

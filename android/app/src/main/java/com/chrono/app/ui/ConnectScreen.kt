@@ -26,8 +26,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -47,10 +47,12 @@ import com.chrono.app.ui.theme.TextDim
 @Composable
 fun ConnectScreen(vm: ChronoViewModel, connState: ConnState) {
     val found by vm.ble.found.collectAsState()
-    var btEnabled by remember { mutableStateOf(vm.ble.adapter?.isEnabled == true) }
+    var btEnabled by remember {
+        mutableStateOf(runCatching { vm.ble.adapter?.isEnabled == true }.getOrDefault(false))
+    }
     val enableBt = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
-    ) { btEnabled = vm.ble.adapter?.isEnabled == true }
+    ) { btEnabled = runCatching { vm.ble.adapter?.isEnabled == true }.getOrDefault(false) }
 
     // Scan while this screen is visible; stop when we leave it.
     DisposableEffect(btEnabled) {
@@ -81,7 +83,9 @@ fun ConnectScreen(vm: ChronoViewModel, connState: ConnState) {
                     color = TextDim,
                 )
                 Spacer(Modifier.height(20.dp))
-                Button(onClick = { enableBt.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) }) {
+                Button(onClick = {
+                    runCatching { enableBt.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) }
+                }) {
                     Text("Turn on Bluetooth")
                 }
             }
@@ -109,8 +113,10 @@ fun ConnectScreen(vm: ChronoViewModel, connState: ConnState) {
                         color = TextDim,
                     )
                 } else {
+                    // fill=false: take only what the list needs, so the
+                    // simulation entry below is never pushed off-screen.
                     LazyColumn(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         items(found, key = { it.device.address }) { d ->
@@ -151,13 +157,16 @@ fun ConnectScreen(vm: ChronoViewModel, connState: ConnState) {
             Modifier.padding(vertical = 16.dp),
             color = MaterialTheme.colorScheme.outline,
         )
-        TextButton(onClick = { vm.connectSimulated() }) {
+        OutlinedButton(
+            onClick = { vm.connectSimulated() },
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+        ) {
             Icon(
                 Icons.Filled.PlayCircleOutline, null,
                 tint = TextDim, modifier = Modifier.size(18.dp),
             )
             Spacer(Modifier.size(8.dp))
-            Text("Try it without a device (simulation)", color = TextDim)
+            Text("Simulation mode — no hardware needed", color = TextDim)
         }
     }
 }

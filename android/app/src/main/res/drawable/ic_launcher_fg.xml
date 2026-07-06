@@ -1,27 +1,58 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Aggressive angular wolf head in amber over a teal clock face. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- stopwatch ring -->
+
+    <!-- clock ring -->
     <path
-        android:pathData="M54,32 a22,22 0 1,0 0.01,0 Z"
-        android:strokeColor="#F5A524"
-        android:strokeWidth="5"
-        android:fillColor="#00000000" />
-    <!-- crown -->
-    <path
-        android:pathData="M48,24 h12 v6 h-12 Z"
-        android:fillColor="#F5A524" />
-    <!-- hand -->
-    <path
-        android:pathData="M54,54 L66,44"
+        android:pathData="M54,24 a30,30 0 1,0 0.01,0 Z"
         android:strokeColor="#2DD4BF"
-        android:strokeWidth="4"
+        android:strokeWidth="3.5"
+        android:fillColor="#00000000" />
+    <!-- major ticks: 12, 3, 6, 9 -->
+    <path
+        android:pathData="M54,24 L54,29 M84,54 L79,54 M54,84 L54,79 M24,54 L29,54"
+        android:strokeColor="#2DD4BF"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+    <!-- hands (mostly hidden behind the head; tips peek out) -->
+    <path
+        android:pathData="M54,54 L70,31"
+        android:strokeColor="#E8EDF2"
+        android:strokeWidth="3"
         android:strokeLineCap="round"
         android:fillColor="#00000000" />
     <path
-        android:pathData="M54,54 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0"
-        android:fillColor="#2DD4BF" />
+        android:pathData="M54,54 L41,46"
+        android:strokeColor="#E8EDF2"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- wolf head silhouette -->
+    <path
+        android:pathData="M54,28 L44,32 L34,20 L33,38 L26,46 L32,54 L28,62 L38,64 L44,74 L50,72 L54,86 L58,72 L64,74 L70,64 L80,62 L76,54 L82,46 L75,38 L74,20 L64,32 Z"
+        android:fillColor="#F5A524" />
+    <!-- inner ears -->
+    <path
+        android:pathData="M37,26 L36,36 L42,33 Z"
+        android:fillColor="#0B0F14" />
+    <path
+        android:pathData="M71,26 L72,36 L66,33 Z"
+        android:fillColor="#0B0F14" />
+    <!-- angry slanted eyes -->
+    <path
+        android:pathData="M38,47 L50,52 L40,55 Z"
+        android:fillColor="#0B0F14" />
+    <path
+        android:pathData="M70,47 L58,52 L68,55 Z"
+        android:fillColor="#0B0F14" />
+    <!-- nose -->
+    <path
+        android:pathData="M50,73 L58,73 L54,79 Z"
+        android:fillColor="#0B0F14" />
 </vector>

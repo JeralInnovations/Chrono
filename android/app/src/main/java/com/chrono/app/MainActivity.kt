@@ -20,6 +20,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -68,7 +69,10 @@ private fun requiredPermissions(): Array<String> =
         arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
     }
 
-/** Blocks the app behind the Bluetooth runtime permissions. */
+/**
+ * Blocks Bluetooth features behind the runtime permissions — but never blocks
+ * simulation mode, which needs no radio and no permission at all.
+ */
 @Composable
 private fun PermissionGate(content: @Composable () -> Unit) {
     val context = LocalContext.current
@@ -79,6 +83,7 @@ private fun PermissionGate(content: @Composable () -> Unit) {
             }
         )
     }
+    var simOnly by remember { mutableStateOf(false) }
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result -> granted = result.values.all { it } }
@@ -87,7 +92,7 @@ private fun PermissionGate(content: @Composable () -> Unit) {
         if (!granted) launcher.launch(requiredPermissions())
     }
 
-    if (granted) {
+    if (granted || simOnly) {
         content()
     } else {
         Column(
@@ -104,6 +109,10 @@ private fun PermissionGate(content: @Composable () -> Unit) {
                 onClick = { launcher.launch(requiredPermissions()) },
                 modifier = Modifier.padding(top = 24.dp),
             ) { Text("Grant permission") }
+            TextButton(
+                onClick = { simOnly = true },
+                modifier = Modifier.padding(top = 12.dp),
+            ) { Text("Continue in simulation mode — no Bluetooth needed") }
         }
     }
 }

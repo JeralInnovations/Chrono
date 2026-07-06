@@ -95,6 +95,7 @@ const uint8_t UUID_CONTROL[16] = CHRONO_UUID(0x0003);
 const uint8_t UUID_RESULT [16] = CHRONO_UUID(0x0004);
 const uint8_t UUID_TIME   [16] = CHRONO_UUID(0x0005);
 const uint8_t UUID_CAL    [16] = CHRONO_UUID(0x0006);
+const uint8_t UUID_INFO   [16] = CHRONO_UUID(0x0007);
 
 BLEService        svc     (UUID_SERVICE);
 BLECharacteristic chStatus (UUID_STATUS);   // read/notify: [state, pendingCount, timeValid]
@@ -102,6 +103,7 @@ BLECharacteristic chControl(UUID_CONTROL);  // write: commands
 BLECharacteristic chResult (UUID_RESULT);   // read/notify: Result struct below
 BLECharacteristic chTime   (UUID_TIME);     // write: uint32 LE unix seconds
 BLECharacteristic chCal    (UUID_CAL);      // read/notify: CalResult struct below
+BLECharacteristic chInfo   (UUID_INFO);     // read: HwInfo struct below
 
 // One measurement. 11 bytes, little-endian — parsed byte-for-byte by the app.
 struct __attribute__((packed)) Result {
@@ -127,6 +129,24 @@ struct __attribute__((packed)) CalResult {
   uint32_t meanNs;
   uint32_t stddevNs;
   uint32_t minNs;
+};
+
+// Identifies this hardware/firmware to the app so it can apply the right
+// accuracy model. A future revision with tighter timing (e.g. a TDC front
+// end) reports different numbers here and the app's confidence estimate
+// follows automatically — no app update needed.
+const uint8_t HW_REV   = 1;
+const uint8_t FW_MAJOR = 1;
+const uint8_t FW_MINOR = 2;
+
+struct __attribute__((packed)) HwInfo {
+  uint8_t  hwRev;
+  uint8_t  fwMajor;
+  uint8_t  fwMinor;
+  uint8_t  reserved;
+  uint32_t tickPs;        // timer tick period in picoseconds (62500 = 62.5 ns)
+  uint16_t clockPpm;      // crystal tolerance
+  uint16_t edgeJitterNs;  // conservative per-edge front-end uncertainty
 };
 
 // ------------------------------------------------------- run-time state
@@ -513,6 +533,15 @@ void setup() {
   chCal.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
   chCal.setFixedLen(sizeof(CalResult));
   chCal.begin();
+
+  chInfo.setProperties(CHR_PROPS_READ);
+  chInfo.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+  chInfo.setFixedLen(sizeof(HwInfo));
+  chInfo.begin();
+  // Rev 1: 16 MHz hardware capture, HFXO +/-30 ppm, piezo->GPIO front end
+  // with a conservative 300 ns per-edge threshold-walk allowance.
+  HwInfo info = { HW_REV, FW_MAJOR, FW_MINOR, 0, 62500UL, 30, 300 };
+  chInfo.write((uint8_t*)&info, sizeof(info));
 
   notifyStatus();
 

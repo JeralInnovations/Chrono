@@ -35,6 +35,7 @@ object Proto {
     val RESULT: UUID = UUID.fromString("a5c40004-9d95-4e4c-8c5a-c1d6f2a80de1")
     val TIME: UUID = UUID.fromString("a5c40005-9d95-4e4c-8c5a-c1d6f2a80de1")
     val CAL: UUID = UUID.fromString("a5c40006-9d95-4e4c-8c5a-c1d6f2a80de1")
+    val INFO: UUID = UUID.fromString("a5c40007-9d95-4e4c-8c5a-c1d6f2a80de1")
     val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
     const val CMD_VERIFY1: Byte = 1
@@ -59,6 +60,25 @@ object Proto {
 data class DeviceStatus(val state: Int, val pendingCount: Int, val timeValid: Boolean)
 
 data class RawResult(val id: Int, val splitNs: Long, val epochSec: Long)
+
+/**
+ * Self-reported identity and timing spec of the connected hardware. The app
+ * derives its accuracy model from these numbers, so a future revision that
+ * reports a finer tick or lower jitter automatically shows tighter confidence.
+ */
+data class HwInfo(
+    val hwRev: Int,
+    val fwMajor: Int,
+    val fwMinor: Int,
+    val tickPs: Long,         // timer tick period, picoseconds
+    val clockPpm: Int,        // crystal tolerance
+    val edgeJitterNs: Int,    // per-edge front-end uncertainty
+) {
+    companion object {
+        /** Assumed when the device predates the INFO characteristic. */
+        val DEFAULT = HwInfo(1, 1, 0, 62_500, 30, 300)
+    }
+}
 
 /** One calibration sweep summary from the device (all times in ns). */
 data class CalReading(
@@ -87,6 +107,7 @@ class ChronoBle(private val context: Context) {
     val status = MutableStateFlow<DeviceStatus?>(null)
     val results = MutableSharedFlow<RawResult>(extraBufferCapacity = 32)
     val cal = MutableSharedFlow<CalReading>(extraBufferCapacity = 8)
+    val hwInfo = MutableStateFlow<HwInfo?>(null)
     val found = MutableStateFlow<List<FoundDevice>>(emptyList())
 
     val adapter: BluetoothAdapter?
@@ -100,6 +121,7 @@ class ChronoBle(private val context: Context) {
     private var chResult: BluetoothGattCharacteristic? = null
     private var chTime: BluetoothGattCharacteristic? = null
     private var chCal: BluetoothGattCharacteristic? = null
+    private var chInfo: BluetoothGattCharacteristic? = null
 
     // ------------------------------------------------------------ scanning
 
@@ -143,6 +165,7 @@ class ChronoBle(private val context: Context) {
             simJob?.cancel()
             isSimulation = false
             status.value = null
+            hwInfo.value = null
             connState.value = ConnState.DISCONNECTED
             return
         }
@@ -151,6 +174,7 @@ class ChronoBle(private val context: Context) {
         runCatching { gatt?.disconnect(); gatt?.close() }
         gatt = null
         status.value = null
+        hwInfo.value = null
         connState.value = ConnState.DISCONNECTED
     }
 
@@ -183,6 +207,7 @@ class ChronoBle(private val context: Context) {
         simTimeValid = false
         simCalCount[0] = 0
         simCalCount[1] = 0
+        hwInfo.value = HwInfo(1, 1, 2, 62_500, 30, 300)   // pretends to be rev 1
         pushSimStatus()
         connState.value = ConnState.CONNECTED
     }
@@ -364,6 +389,14 @@ class ChronoBle(private val context: Context) {
         }
     }
 
+    private fun readInfo() {
+        enqueue {
+            val g = gatt ?: return@enqueue false
+            val c = chInfo ?: return@enqueue false
+            g.readCharacteristic(c)
+        }
+    }
+
     // ------------------------------------------------------- GATT callbacks
 
     private val gattCb = object : BluetoothGattCallback() {
@@ -406,7 +439,8 @@ class ChronoBle(private val context: Context) {
             chControl = svc.getCharacteristic(Proto.CONTROL)
             chResult = svc.getCharacteristic(Proto.RESULT)
             chTime = svc.getCharacteristic(Proto.TIME)
-            chCal = svc.getCharacteristic(Proto.CAL)   // optional (newer firmware)
+            chCal = svc.getCharacteristic(Proto.CAL)    // optional (newer firmware)
+            chInfo = svc.getCharacteristic(Proto.INFO)  // optional (newer firmware)
             if (chStatus == null || chControl == null || chResult == null || chTime == null) {
                 g.disconnect()
                 return
@@ -415,6 +449,7 @@ class ChronoBle(private val context: Context) {
             enableNotifications(chResult!!)
             chCal?.let { enableNotifications(it) }
             readStatus()
+            readInfo()
             syncTime()                        // sync clock on every (re)connect
             sendCommand(Proto.CMD_FETCH)      // collect results recorded while disconnected
             enqueue {
@@ -465,6 +500,17 @@ class ChronoBle(private val context: Context) {
                 val stddevNs = b.int.toLong() and 0xFFFFFFFFL
                 val minNs = b.int.toLong() and 0xFFFFFFFFL
                 cal.tryEmit(CalReading(channel, calStatus, samples, medianNs, meanNs, stddevNs, minNs))
+            }
+            Proto.INFO -> if (v.size >= 12) {
+                val b = ByteBuffer.wrap(v).order(ByteOrder.LITTLE_ENDIAN)
+                val hwRev = b.get().toInt() and 0xFF
+                val fwMajor = b.get().toInt() and 0xFF
+                val fwMinor = b.get().toInt() and 0xFF
+                b.get()   // reserved
+                val tickPs = b.int.toLong() and 0xFFFFFFFFL
+                val clockPpm = b.short.toInt() and 0xFFFF
+                val edgeJitterNs = b.short.toInt() and 0xFFFF
+                hwInfo.value = HwInfo(hwRev, fwMajor, fwMinor, tickPs, clockPpm, edgeJitterNs)
             }
         }
     }

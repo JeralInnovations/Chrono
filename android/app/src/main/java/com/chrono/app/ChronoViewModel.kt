@@ -19,10 +19,13 @@ import androidx.compose.runtime.mutableStateMapOf
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.chrono.app.ble.HwInfo
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 import kotlin.math.abs
+import kotlin.math.pow
+import kotlin.math.sqrt
 
 enum class Screen { CONNECT, BASELINE, SENSOR1, SENSOR2, DISTANCE, DASHBOARD }
 
@@ -253,6 +256,29 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         return abs(a - b)
     }
 
+    /**
+     * ~95% confidence interval for one result, as a percent of the velocity.
+     * Combines what the hardware reports about itself (timer tick, crystal
+     * ppm, per-edge front-end jitter) with this rig's measured channel
+     * mismatch (scaled from the 10k calibration stimulus down to the ~1k
+     * live source impedance) and a 0.5 mm assumption on the user's
+     * gate-spacing measurement. Newer hardware that reports tighter numbers
+     * automatically tightens this — no app change needed.
+     */
+    fun ciPercentFor(r: TestResult): Double {
+        val hw = ble.hwInfo.value ?: HwInfo.DEFAULT
+        val t = r.splitNs.toDouble()
+        if (t <= 0 || r.distanceM <= 0) return 0.0
+        val tickNs = hw.tickPs / 1000.0
+        val jitterNs = hw.edgeJitterNs * sqrt(2.0)             // two independent edges
+        val clockNs = t * hw.clockPpm / 1_000_000.0
+        val residualNs = (channelMismatchNs() ?: 200L) / 10.0  // cal->live impedance scale
+        val sigmaT = sqrt(jitterNs * jitterNs + tickNs * tickNs + clockNs * clockNs) + residualNs
+        val sigmaD = 0.0005                                    // 0.5 mm spacing uncertainty
+        val rel = sqrt((sigmaT / t).pow(2.0) + (sigmaD / r.distanceM).pow(2.0))
+        return 2 * rel * 100
+    }
+
     // ---------------------------------------------------------- setup flow
 
     fun continueToSensor1() {
@@ -306,6 +332,11 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
 
     fun changeDistance() {
         screen = Screen.DISTANCE
+    }
+
+    /** Re-run the whole wizard, including a fresh bare-port baseline. */
+    fun redoSetup() {
+        screen = Screen.BASELINE
     }
 
     fun disconnect() = ble.disconnect()

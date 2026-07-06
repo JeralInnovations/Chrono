@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.BluetoothConnected
 import androidx.compose.material.icons.filled.BluetoothDisabled
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -40,11 +41,13 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.CornerRadius
@@ -60,6 +63,7 @@ import com.chrono.app.ChronoViewModel
 import com.chrono.app.ble.ConnState
 import com.chrono.app.ble.DeviceStatus
 import com.chrono.app.ble.Proto
+import com.chrono.app.data.Exporter
 import com.chrono.app.data.TestResult
 import com.chrono.app.ui.theme.Amber
 import com.chrono.app.ui.theme.Bad
@@ -105,6 +109,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
     val armed = state == Proto.ST_ARMED
     val running = state == Proto.ST_RUNNING
     var editing by remember { mutableStateOf<TestResult?>(null) }
+    val context = LocalContext.current
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -164,15 +169,33 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
 
         if (vm.results.isNotEmpty()) {
             item {
-                Text(
-                    "RESULTS",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextDim,
-                    modifier = Modifier.padding(top = 10.dp, start = 4.dp),
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp, start = 4.dp),
+                ) {
+                    Text(
+                        "RESULTS",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextDim,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { Exporter.export(context, vm.results.toList()) }) {
+                        Icon(
+                            Icons.Filled.Share, null,
+                            tint = TextDim, modifier = Modifier.size(15.dp),
+                        )
+                        Spacer(Modifier.size(6.dp))
+                        Text("Export", color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
             }
             items(vm.results, key = { it.uid }) { r ->
-                ResultCard(r, latest = r == vm.results.firstOrNull(), onEdit = { editing = r })
+                ResultCard(
+                    r,
+                    latest = r == vm.results.firstOrNull(),
+                    ciPercent = vm.ciPercentFor(r),
+                    onEdit = { editing = r },
+                )
             }
         }
     }
@@ -431,7 +454,7 @@ private fun ChannelsCard(vm: ChronoViewModel, enabled: Boolean) {
             Spacer(Modifier.height(6.dp))
             when {
                 !hasBaseline -> Text(
-                    "No baseline captured — rerun setup with empty ports to enable.",
+                    "No baseline captured — redo setup with empty ports to enable.",
                     style = MaterialTheme.typography.bodyMedium, color = TextDim,
                 )
                 mismatch == null -> Text(
@@ -447,6 +470,19 @@ private fun ChannelsCard(vm: ChronoViewModel, enabled: Boolean) {
                         "check that both cables are the same length and type.",
                     style = MaterialTheme.typography.bodyMedium, color = Amber,
                 )
+            }
+            Spacer(Modifier.height(8.dp))
+            val hw by vm.ble.hwInfo.collectAsState()
+            Text(
+                hw?.let {
+                    "Hardware rev ${it.hwRev} · fw ${it.fwMajor}.${it.fwMinor} · " +
+                        "%.1f ns timer · auto-identified".format(it.tickPs / 1000.0)
+                } ?: "Hardware not identified — assuming rev 1 accuracy",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextDim,
+            )
+            TextButton(onClick = { vm.redoSetup() }, enabled = enabled) {
+                Text("Redo full setup (new baseline)", style = MaterialTheme.typography.bodyMedium)
             }
         }
     }
@@ -565,7 +601,7 @@ private fun ArmButton(
 }
 
 @Composable
-private fun ResultCard(r: TestResult, latest: Boolean, onEdit: () -> Unit) {
+private fun ResultCard(r: TestResult, latest: Boolean, ciPercent: Double, onEdit: () -> Unit) {
     Card(
         colors = CardDefaults.cardColors(
             containerColor = if (latest) MaterialTheme.colorScheme.surfaceVariant
@@ -603,6 +639,12 @@ private fun ResultCard(r: TestResult, latest: Boolean, onEdit: () -> Unit) {
                     )
                     Text(
                         "%.3f ms split".format(r.splitMillis),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextDim,
+                    )
+                    Text(
+                        if (ciPercent >= 0.05) "±%.1f%% (95%% CI)".format(ciPercent)
+                        else "±<0.1% (95% CI)",
                         style = MaterialTheme.typography.bodyMedium,
                         color = TextDim,
                     )
