@@ -13,7 +13,6 @@ import com.chrono.app.ble.ConnState
 import com.chrono.app.ble.Proto
 import com.chrono.app.ble.RawResult
 import android.net.Uri
-import androidx.core.content.FileProvider
 import com.chrono.app.data.DistanceUnit
 import com.chrono.app.data.ResultStore
 import com.chrono.app.data.SessionManager
@@ -82,21 +81,20 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     private fun promptPhotos(kind: String) { photoPrompt = kind; photoCount = 0 }
     fun dismissPhotoPrompt() { photoPrompt = null }
 
-    /** Create the next photo file inside the right shot folder. */
-    fun newPhotoFile(): Pair<File, Uri>? {
+    /** Create the next photo target inside the right shot folder. */
+    fun newPhotoUri(): Uri? {
         val kind = photoPrompt ?: return null
-        val dir = if (kind == "setup") session.folderForSetupPhoto()
-        else session.folderForAfterPhoto()
-        dir.mkdirs()
-        val f = File(dir, "${kind}_${System.currentTimeMillis()}.jpg")
-        val app = getApplication<Application>()
-        val uri = FileProvider.getUriForFile(app, app.packageName + ".fileprovider", f)
-        return f to uri
+        return session.newPhotoUri(kind)
     }
 
-    fun photoSaved(ok: Boolean, file: File) {
-        if (ok) photoCount++ else file.delete()
+    fun photoSaved(ok: Boolean, uri: Uri) {
+        if (ok) photoCount++
+        else runCatching {
+            getApplication<Application>().contentResolver.delete(uri, null, null)
+        }
     }
+
+    fun openDataFolder() = session.openFolder(getApplication())
 
     // The distance is kept exactly as the user typed it, in their chosen unit.
     // Converting to meters and back would turn "12 in" into 11.999… on screen.
@@ -162,44 +160,57 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         viewModelScope.launch {
+            var prev = ConnState.DISCONNECTED
             ble.connState.collect { cs ->
                 when (cs) {
                     ConnState.CONNECTED -> if (screen == Screen.CONNECT) {
                         screen = if (setupDone) Screen.DASHBOARD else Screen.BASELINE
                     }
-                    ConnState.DISCONNECTED -> {
-                        // Only a deliberate disconnect lands here; unexpected drops
-                        // go to RECONNECTING and keep the current screen.
-                        screen = Screen.CONNECT
-                        retestSensor = null
-                    }
+                    ConnState.DISCONNECTED ->
+                        // Leave the dashboard only when a real device session
+                        // ended. A stopped scan (SCANNING -> DISCONNECTED, e.g.
+                        // when entering manual mode) must not kick us back.
+                        if (prev == ConnState.CONNECTED || prev == ConnState.RECONNECTING ||
+                            prev == ConnState.CONNECTING
+                        ) {
+                            screen = Screen.CONNECT
+                            retestSensor = null
+                        }
                     else -> Unit
                 }
+                prev = cs
             }
         }
     }
 
     // -------------------------------------------------------------- results
 
+    /** Shots just received and not yet reviewed — drives the results screen
+     *  that appears after (re)connecting, before the after-photos prompt. */
+    val newShots = mutableStateListOf<TestResult>()
+
+    fun dismissShotReview() {
+        newShots.clear()
+        promptPhotos("after")
+    }
+
     private fun onRawResult(r: RawResult) {
         // FETCH after a reconnect can re-deliver a result we already stored.
         val duplicate = results.any { it.deviceResultId == r.id && it.splitNs == r.splitNs }
         if (!duplicate) {
-            results.add(
-                0,
-                TestResult(
-                    uid = UUID.randomUUID().toString(),
-                    deviceResultId = r.id,
-                    splitNs = r.splitNs,
-                    distanceM = distanceM,
-                    label = pendingLabel.trim(),
-                    epochMillis = if (r.epochSec > 0) r.epochSec * 1000L else null,
-                    tool = pendingTool.trim(),
-                    target = pendingTarget.trim(),
-                    targetDistValue = pendingTargetDistVal.replace(',', '.').toDoubleOrNull(),
-                    targetDistUnit = pendingTargetDistUnit,
-                )
+            val rec = TestResult(
+                uid = UUID.randomUUID().toString(),
+                deviceResultId = r.id,
+                splitNs = r.splitNs,
+                distanceM = distanceM,
+                label = pendingLabel.trim(),
+                epochMillis = if (r.epochSec > 0) r.epochSec * 1000L else null,
+                tool = pendingTool.trim(),
+                target = pendingTarget.trim(),
+                targetDistValue = pendingTargetDistVal.replace(',', '.').toDoubleOrNull(),
+                targetDistUnit = pendingTargetDistUnit,
             )
+            results.add(0, rec)
             persist()
             prefs.edit()
                 .putString("pendTool", pendingTool)
@@ -207,10 +218,10 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
                 .putString("pendTdVal", pendingTargetDistVal)
                 .putString("pendTdUnit", pendingTargetDistUnit)
                 .apply()
-            session.logShot(shotJson(results[0]))
-            promptPhotos("after")
+            session.logShot(shotJson(rec))
+            newShots.add(rec)   // review dialog first; photos prompt on dismiss
             // A real shot destroys both break-screens: force re-verify (and the
-            // retest flow re-measures the fresh screen's load automatically).
+            // sensor-attach flow re-measures the fresh screen's load).
             setSensorReady(1, false)
             setSensorReady(2, false)
         }
@@ -440,17 +451,23 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
 
     // ------------------------------------------------------------ dashboard
 
+    /**
+     * Opens the sensor-attach dialog. Deliberately does NOT start listening on
+     * the input yet: the wire is first fitted (attach), then verified by a
+     * capacitance measurement, and only then armed for the tap test — so
+     * movement during placement can't trigger anything.
+     */
     fun startRetest(sensor: Int) {
         retestSensor = sensor
-        ble.sendCommand(if (sensor == 1) Proto.CMD_VERIFY1 else Proto.CMD_VERIFY2)
     }
 
+    /** Step 3 of the attach flow: now it's safe to listen for the test tap. */
+    fun beginTapTest(sensor: Int) =
+        ble.sendCommand(if (sensor == 1) Proto.CMD_VERIFY1 else Proto.CMD_VERIFY2)
+
     fun finishRetest(verified: Boolean) {
-        val sensor = retestSensor
         retestSensor = null
         ble.sendCommand(Proto.CMD_CANCEL)
-        // A fresh screen is a new electrical load — re-measure it right away.
-        if (verified && sensor != null) startLoadedCal(sensor)
     }
 
     fun arm() = ble.sendCommand(Proto.CMD_ARM)

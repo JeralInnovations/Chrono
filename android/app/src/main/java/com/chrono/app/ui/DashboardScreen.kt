@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.BluetoothDisabled
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.DropdownMenu
@@ -79,7 +80,6 @@ import com.chrono.app.ble.Proto
 import com.chrono.app.data.Exporter
 import com.chrono.app.data.TARGET_DIST_UNITS
 import com.chrono.app.data.TestResult
-import java.io.File
 import com.chrono.app.ui.theme.Amber
 import com.chrono.app.ui.theme.Bad
 import com.chrono.app.ui.theme.Good
@@ -127,11 +127,14 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
     var manualEntry by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
-    // System camera via FileProvider URI: no CAMERA permission required.
-    var pendingPhoto by remember { mutableStateOf<File?>(null) }
+    // System camera writing straight into the shot folder: no CAMERA permission.
+    var pendingPhoto by remember { mutableStateOf<android.net.Uri?>(null) }
     val takePicture = rememberLauncherForActivityResult(
         ActivityResultContracts.TakePicture()
     ) { ok -> pendingPhoto?.let { vm.photoSaved(ok, it) }; pendingPhoto = null }
+
+    // Manual-logging mode: no device, so hide everything device-specific.
+    val offline = connState == ConnState.DISCONNECTED
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -142,6 +145,16 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
 
         if (connState == ConnState.RECONNECTING) {
             item { ReconnectingBanner() }
+        }
+
+        if (!offline) {
+            item {
+                OutlinedButton(
+                    onClick = { vm.redoSetup() },
+                    enabled = connState == ConnState.CONNECTED && !armed && !running,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Set up new test") }
+            }
         }
 
         if (vm.isSimulation) {
@@ -159,44 +172,58 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                         color = Teal,
                         modifier = Modifier.weight(1f),
                     )
-                    TextButton(
-                        onClick = { vm.simulateSignalLoss() },
-                        enabled = connState == ConnState.CONNECTED,
-                    ) { Text("Drop signal", color = Teal) }
+                    TextButton(onClick = { vm.simulateSignalLoss() }) {
+                        Text(
+                            if (connState == ConnState.RECONNECTING) "Restore signal"
+                            else "Drop signal",
+                            color = Teal,
+                        )
+                    }
                 }
             }
         }
 
-        item { RigCard(vm, enabled = connState == ConnState.CONNECTED && !armed && !running) }
+        if (offline) {
+            item {
+                Text(
+                    "Manual logging — no chronograph connected. Entries, photos, " +
+                        "and exports work; measuring needs the device.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextDim,
+                )
+            }
+        } else {
+            item { RigCard(vm, enabled = connState == ConnState.CONNECTED && !armed && !running) }
 
-        item {
-            ChannelsCard(
-                vm,
-                enabled = connState == ConnState.CONNECTED && !armed && !running && !vm.calRunning,
-            )
-        }
+            item {
+                ChannelsCard(
+                    vm,
+                    enabled = connState == ConnState.CONNECTED && !armed && !running && !vm.calRunning,
+                )
+            }
 
-        item { NextTestCard(vm, armed = armed || running) }
+            item { NextTestCard(vm, armed = armed || running) }
 
-        item {
-            ArmButton(
-                armed = armed,
-                running = running,
-                connected = connState == ConnState.CONNECTED || connState == ConnState.RECONNECTING,
-                sensorsReady = vm.sensor1Ready && vm.sensor2Ready,
-                onArm = { vm.arm() },
-                onDisarm = { vm.disarm() },
-            )
+            item {
+                ArmButton(
+                    armed = armed,
+                    running = running,
+                    connected = connState == ConnState.CONNECTED || connState == ConnState.RECONNECTING,
+                    sensorsReady = vm.sensor1Ready && vm.sensor2Ready,
+                    onArm = { vm.arm() },
+                    onDisarm = { vm.disarm() },
+                )
+            }
         }
 
         item {
             OutlinedButton(
                 onClick = { manualEntry = true },
-                modifier = Modifier.fillMaxWidth().height(48.dp),
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(Icons.Filled.EditNote, null, tint = TextDim, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.size(8.dp))
-                Text("Log manual entry (no chrono)", color = TextDim)
+                Text("Log manual entry", color = TextDim)
             }
         }
 
@@ -212,6 +239,14 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                         color = TextDim,
                         modifier = Modifier.weight(1f),
                     )
+                    TextButton(onClick = { vm.openDataFolder() }) {
+                        Icon(
+                            Icons.Filled.FolderOpen, null,
+                            tint = TextDim, modifier = Modifier.size(15.dp),
+                        )
+                        Spacer(Modifier.size(6.dp))
+                        Text("Files", color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                    }
                     TextButton(onClick = { Exporter.export(context, vm.results.toList()) }) {
                         Icon(
                             Icons.Filled.Share, null,
@@ -233,23 +268,134 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
         }
     }
 
-    // Retest overlay
+    // Sensor-attach flow: fit wire -> capacitance check -> tap test.
+    // The input is deliberately NOT armed until the tap step, so movement
+    // during placement can't trigger anything.
     vm.retestSensor?.let { sensor ->
-        val verified = (deviceStatus?.state ?: -1) ==
-            if (sensor == 1) Proto.ST_VERIFY1_OK else Proto.ST_VERIFY2_OK
+        var step by remember(sensor) { mutableStateOf("attach") }
+        val verified = state == if (sensor == 1) Proto.ST_VERIFY1_OK else Proto.ST_VERIFY2_OK
         AlertDialog(
-            onDismissRequest = { vm.finishRetest(verified) },
-            confirmButton = {
-                TextButton(onClick = { vm.finishRetest(verified) }) {
-                    Text(if (verified) "Done" else "Cancel")
+            onDismissRequest = { vm.finishRetest(false) },
+            title = { Text("Sensor $sensor — ${if (sensor == 1) "start" else "stop"}") },
+            text = {
+                Column {
+                    when (step) {
+                        "attach" -> Text(
+                            "Fit the new sensor into port $sensor and route the wire. " +
+                                "Nothing is armed yet — take your time. Confirm below " +
+                                "when it's physically in place.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        "measure" -> {
+                            if (vm.calRunning) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CircularProgressIndicator(
+                                        color = Amber,
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                    )
+                                    Spacer(Modifier.size(8.dp))
+                                    Text("Checking capacitance…", color = TextDim)
+                                }
+                            } else {
+                                val load = vm.channelLoadNs(sensor)
+                                when {
+                                    load == null -> Text(
+                                        "Couldn't measure. Check the connection to the " +
+                                            "device and try again.",
+                                        color = Amber,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                    load > 250 -> Text(
+                                        "Sensor detected: capacitance is +%.2f µs over the bare-port baseline (≈ %d pF). Looks attached."
+                                            .format(load / 1000.0, (load / 12.0).toInt()),
+                                        color = Good,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                    else -> Text(
+                                        "No capacitance increase over the bare-port " +
+                                            "baseline — the sensor doesn't look attached. " +
+                                            "Check the clips and re-measure.",
+                                        color = Amber,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                }
+                            }
+                        }
+                        else -> VerifyPane(
+                            sensor = sensor,
+                            deviceState = state,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                 }
             },
+            confirmButton = {
+                when (step) {
+                    "attach" -> TextButton(onClick = {
+                        vm.startLoadedCal(sensor)
+                        step = "measure"
+                    }) { Text("Sensor attached") }
+                    "measure" -> Row {
+                        TextButton(
+                            onClick = { vm.startLoadedCal(sensor) },
+                            enabled = !vm.calRunning,
+                        ) { Text("Re-measure") }
+                        TextButton(
+                            onClick = {
+                                vm.beginTapTest(sensor)
+                                step = "tap"
+                            },
+                            enabled = !vm.calRunning,
+                        ) { Text("Continue") }
+                    }
+                    else -> TextButton(
+                        onClick = { vm.finishRetest(true) },
+                        enabled = verified,
+                    ) { Text("Done") }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.finishRetest(false) }) { Text("Cancel") }
+            },
+        )
+    }
+
+    // Shots received (e.g. after walking back into range): review, then photos.
+    if (vm.newShots.isNotEmpty() && vm.retestSensor == null) {
+        AlertDialog(
+            onDismissRequest = { vm.dismissShotReview() },
+            title = {
+                Text(if (vm.newShots.size == 1) "Shot recorded" else "${vm.newShots.size} shots received")
+            },
             text = {
-                VerifyPane(
-                    sensor = sensor,
-                    deviceState = deviceStatus?.state ?: -1,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                Column {
+                    for (s in vm.newShots) {
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Text(
+                                "%.1f".format(s.feetPerSecond),
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 26.sp,
+                                color = Amber,
+                            )
+                            Spacer(Modifier.size(6.dp))
+                            Text("ft/s", color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                            Spacer(Modifier.size(12.dp))
+                            Text(
+                                "%.3f ms".format(s.splitMillis),
+                                color = TextDim,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                        if (s.label.isNotBlank()) {
+                            Text(s.label, style = MaterialTheme.typography.bodyMedium, color = TextDim)
+                        }
+                        Spacer(Modifier.height(8.dp))
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.dismissShotReview() }) { Text("Continue") }
             },
         )
     }
@@ -308,8 +454,8 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
             },
             confirmButton = {
                 TextButton(onClick = {
-                    vm.newPhotoFile()?.let { (file, uri) ->
-                        pendingPhoto = file
+                    vm.newPhotoUri()?.let { uri ->
+                        pendingPhoto = uri
                         runCatching { takePicture.launch(uri) }
                     }
                 }) {
@@ -375,9 +521,10 @@ private fun TopBar(vm: ChronoViewModel, connState: ConnState, deviceStatus: Devi
             }
             vm.sessionName?.let {
                 Text(
-                    "Folder: $it",
+                    "Folder: ${vm.session.pathLabel} — tap to open",
                     style = MaterialTheme.typography.labelSmall,
                     color = TextDim,
+                    modifier = Modifier.clickable { vm.openDataFolder() },
                 )
             }
         }
@@ -434,7 +581,8 @@ private fun RigCard(vm: ChronoViewModel, enabled: Boolean) {
             if (!vm.sensor1Ready || !vm.sensor2Ready) {
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "Each shot consumes the screens. Fit new wire, then tap the torn sensor to retest it.",
+                    "Each shot consumes the screens. Tap a torn sensor to connect " +
+                        "and verify its replacement.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = Amber,
                 )
@@ -493,9 +641,10 @@ private fun SensorGraphic(number: Int, ready: Boolean, enabled: Boolean, onTap: 
             color = TextDim,
         )
         Text(
-            if (ready) "Ready" else "Retest",
+            if (ready) "Ready" else "Connect new\nsensor",
             style = MaterialTheme.typography.bodyMedium,
             color = frame,
+            textAlign = TextAlign.Center,
         )
     }
 }
@@ -583,9 +732,6 @@ private fun ChannelsCard(vm: ChronoViewModel, enabled: Boolean) {
                 style = MaterialTheme.typography.labelSmall,
                 color = TextDim,
             )
-            TextButton(onClick = { vm.redoSetup() }, enabled = enabled) {
-                Text("Redo full setup (new baseline)", style = MaterialTheme.typography.bodyMedium)
-            }
         }
     }
 }
@@ -623,31 +769,29 @@ private fun NextTestCard(vm: ChronoViewModel, armed: Boolean) {
                 singleLine = true,
             )
             Spacer(Modifier.height(8.dp))
-            Row {
-                OutlinedTextField(
-                    value = vm.pendingTarget,
-                    onValueChange = { vm.pendingTarget = it },
-                    modifier = Modifier.weight(1.2f),
-                    label = { Text("Target") },
-                    placeholder = { Text("Ammo Can etc.", color = TextDim) },
-                    textStyle = fieldText,
-                    singleLine = true,
-                )
-                Spacer(Modifier.size(8.dp))
-                OutlinedTextField(
-                    value = vm.pendingTargetDistVal,
-                    onValueChange = { vm.pendingTargetDistVal = it },
-                    modifier = Modifier.weight(0.8f),
-                    label = { Text("Dist. to target") },
-                    placeholder = { Text("25", color = TextDim) },
-                    textStyle = fieldText,
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    trailingIcon = {
-                        UnitSelector(vm.pendingTargetDistUnit) { vm.pendingTargetDistUnit = it }
-                    },
-                )
-            }
+            OutlinedTextField(
+                value = vm.pendingTarget,
+                onValueChange = { vm.pendingTarget = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Target") },
+                placeholder = { Text("Ammo Can etc.", color = TextDim) },
+                textStyle = fieldText,
+                singleLine = true,
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = vm.pendingTargetDistVal,
+                onValueChange = { vm.pendingTargetDistVal = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Distance to target") },
+                placeholder = { Text("25", color = TextDim) },
+                textStyle = fieldText,
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                trailingIcon = {
+                    UnitSelector(vm.pendingTargetDistUnit) { vm.pendingTargetDistUnit = it }
+                },
+            )
         }
     }
 }
@@ -832,12 +976,19 @@ private fun ResultCard(r: TestResult, latest: Boolean, ciPercent: Double, onEdit
 
 private val EDIT_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
-/** Tap-to-open unit picker, used as a trailing icon inside distance fields. */
+/** Compact tap-to-open unit picker, used as a trailing icon inside fields. */
 @Composable
 private fun UnitSelector(unit: String, onSelect: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
-        TextButton(onClick = { open = true }) { Text(unit, color = Teal) }
+        Text(
+            unit,
+            color = Teal,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier
+                .clickable { open = true }
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+        )
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             TARGET_DIST_UNITS.forEach { u ->
                 DropdownMenuItem(text = { Text(u) }, onClick = { onSelect(u); open = false })
@@ -948,28 +1099,26 @@ private fun EditResultDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
-                Row {
-                    OutlinedTextField(
-                        value = target,
-                        onValueChange = { target = it },
-                        label = { Text("Target") },
-                        placeholder = { Text("Ammo Can etc.", color = TextDim) },
-                        textStyle = fieldText,
-                        singleLine = true,
-                        modifier = Modifier.weight(1.2f),
-                    )
-                    Spacer(Modifier.size(8.dp))
-                    OutlinedTextField(
-                        value = tdVal,
-                        onValueChange = { tdVal = it },
-                        label = { Text("Dist.") },
-                        textStyle = fieldText,
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        trailingIcon = { UnitSelector(tdUnit) { tdUnit = it } },
-                        modifier = Modifier.weight(0.8f),
-                    )
-                }
+                OutlinedTextField(
+                    value = target,
+                    onValueChange = { target = it },
+                    label = { Text("Target") },
+                    placeholder = { Text("Ammo Can etc.", color = TextDim) },
+                    textStyle = fieldText,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = tdVal,
+                    onValueChange = { tdVal = it },
+                    label = { Text("Distance to target") },
+                    textStyle = fieldText,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    trailingIcon = { UnitSelector(tdUnit) { tdUnit = it } },
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = outcome,
@@ -1102,28 +1251,26 @@ private fun ManualEntryDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
-                Row {
-                    OutlinedTextField(
-                        value = target,
-                        onValueChange = { target = it },
-                        label = { Text("Target") },
-                        placeholder = { Text("Ammo Can etc.", color = TextDim) },
-                        textStyle = fieldText,
-                        singleLine = true,
-                        modifier = Modifier.weight(1.2f),
-                    )
-                    Spacer(Modifier.size(8.dp))
-                    OutlinedTextField(
-                        value = tdVal,
-                        onValueChange = { tdVal = it },
-                        label = { Text("Dist.") },
-                        textStyle = fieldText,
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        trailingIcon = { UnitSelector(tdUnit) { tdUnit = it } },
-                        modifier = Modifier.weight(0.8f),
-                    )
-                }
+                OutlinedTextField(
+                    value = target,
+                    onValueChange = { target = it },
+                    label = { Text("Target") },
+                    placeholder = { Text("Ammo Can etc.", color = TextDim) },
+                    textStyle = fieldText,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = tdVal,
+                    onValueChange = { tdVal = it },
+                    label = { Text("Distance to target") },
+                    textStyle = fieldText,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    trailingIcon = { UnitSelector(tdUnit) { tdUnit = it } },
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = outcome,

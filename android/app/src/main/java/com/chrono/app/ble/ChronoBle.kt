@@ -212,14 +212,11 @@ class ChronoBle(private val context: Context) {
         connState.value = ConnState.CONNECTED
     }
 
-    /** Briefly drop to RECONNECTING so the reconnect banner can be seen. */
+    /** Toggle the link for testing: drop to RECONNECTING, tap again to restore. */
     fun simulateSignalLoss() {
         if (!isSimulation) return
-        simScope.launch {
-            connState.value = ConnState.RECONNECTING
-            delay(2600)
-            connState.value = ConnState.CONNECTED
-        }
+        connState.value = if (connState.value == ConnState.RECONNECTING) ConnState.CONNECTED
+        else ConnState.RECONNECTING
     }
 
     private fun pushSimStatus() {

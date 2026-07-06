@@ -160,26 +160,26 @@ fun ConnectScreen(vm: ChronoViewModel, connState: ConnState) {
         )
         OutlinedButton(
             onClick = { vm.connectSimulated() },
-            modifier = Modifier.fillMaxWidth().height(48.dp),
+            modifier = Modifier.fillMaxWidth(),
         ) {
             Icon(
                 Icons.Filled.PlayCircleOutline, null,
                 tint = TextDim, modifier = Modifier.size(18.dp),
             )
             Spacer(Modifier.size(8.dp))
-            Text("Simulation mode — no hardware needed", color = TextDim)
+            Text("Simulation mode", color = TextDim, maxLines = 1)
         }
         Spacer(Modifier.height(8.dp))
         OutlinedButton(
             onClick = { vm.enterManualMode() },
-            modifier = Modifier.fillMaxWidth().height(48.dp),
+            modifier = Modifier.fillMaxWidth(),
         ) {
             Icon(
                 Icons.Filled.EditNote, null,
                 tint = TextDim, modifier = Modifier.size(18.dp),
             )
             Spacer(Modifier.size(8.dp))
-            Text("Manual logging — no chrono connected", color = TextDim)
+            Text("Manual logging (no chrono)", color = TextDim, maxLines = 1)
         }
     }
 }

@@ -151,18 +151,25 @@ The dashboard's **Channel calibration** card shows each port's measured load
 loaded sweep any time (sensors attached, undisturbed). Every sweep is appended
 to `cal_history.jsonl` in the app's private storage for later analysis.
 
-**Test folders, photos, and manual entries.** All field data lives in a
-browsable folder on the phone:
-`Android/data/com.chrono.app/files/ChronoData/Test_<date>/Shot_NNNN/`, where
-each shot folder holds `shot.json` (the full log) plus any photos. On every
-app launch you're asked to keep logging into the previous test folder or
-start a new one. After setup the app prompts for **setup photos** of the rig,
-and after every measurement for **after photos** — both use the phone's
-camera and land in that shot's folder. **Log manual entry** (dashboard, or
-"Manual logging" on the connect screen) records a shot with no chronograph:
-typed velocity (ft/s or m/s, optional), all detail blanks, date/time, and the
-same photo prompts. Tapping an empty date box autofills the current date and
-pre-selects the time for quick editing.
+**Test folders, photos, and manual entries.** All field data lives in
+**`Documents/ChronoData/Test_<date>/Shot_NNNN/`** in the phone's public
+storage — visible in any file manager, with `shot.json` (the full log) plus
+that shot's photos in each folder. Tap the folder name at the top of the
+dashboard (or the *Files* button above the results) to open it. On every app
+launch you're asked to keep logging into the previous test folder or start a
+new one. After setup the app prompts for **setup photos** of the rig; after
+each shot you first get a **results screen** listing what just came in, then
+the **after photos** prompt. **Log manual entry** (dashboard, or "Manual
+logging" on the connect screen — a simplified, device-free view) records a
+shot with no chronograph: typed velocity (ft/s or m/s, optional), all detail
+blanks, date/time, and the same photo prompts. Tapping an empty date box
+autofills the current date and pre-selects the time for quick editing.
+
+**Replacing a consumed sensor** is a guided three-step flow (tap the torn
+sensor): fit the wire with nothing armed, press *Sensor attached* to run a
+capacitance check against the bare-port baseline (catches a sensor that
+isn't actually connected), and only then arm the tap test — so movement
+during placement can't cause a trigger.
 
 **Exporting data.** The *Export* button above the results list shares a CSV of
 every result (label, date, split, distance, velocities) plus the raw
