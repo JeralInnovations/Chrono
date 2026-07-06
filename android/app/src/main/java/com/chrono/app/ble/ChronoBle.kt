@@ -271,10 +271,17 @@ class ChronoBle(private val context: Context) {
         simJob?.cancel()
         simState = if (sensor == 1) Proto.ST_VERIFY1 else Proto.ST_VERIFY2
         pushSimStatus()
-        simJob = simScope.launch {
-            delay(1400)   // stand in for the user triggering the sensor
-            simState = if (sensor == 1) Proto.ST_VERIFY1_OK else Proto.ST_VERIFY2_OK
-            pushSimStatus()
+        // Deliberately does NOT auto-complete: the user presses the app's
+        // "Simulate sensor tap" button, mirroring the real physical tap.
+    }
+
+    /** Sim stand-in for physically tapping the sensor under test. */
+    fun simulateSensorTap() {
+        if (!isSimulation) return
+        when (simState) {
+            Proto.ST_VERIFY1 -> { simState = Proto.ST_VERIFY1_OK; pushSimStatus() }
+            Proto.ST_VERIFY2 -> { simState = Proto.ST_VERIFY2_OK; pushSimStatus() }
+            else -> Unit
         }
     }
 

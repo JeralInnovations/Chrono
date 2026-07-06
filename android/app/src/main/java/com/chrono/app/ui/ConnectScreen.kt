@@ -65,7 +65,13 @@ fun ConnectScreen(vm: ChronoViewModel, connState: ConnState) {
         modifier = Modifier.fillMaxSize().padding(28.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.height(48.dp))
+        Spacer(Modifier.height(40.dp))
+        Text(
+            "JERAL INNOVATIONS",
+            style = MaterialTheme.typography.labelSmall,
+            color = TextDim,
+        )
+        Spacer(Modifier.height(4.dp))
         Text("CHRONO", style = MaterialTheme.typography.displayLarge, color = Amber)
         Text(
             "BLE CHRONOGRAPH",

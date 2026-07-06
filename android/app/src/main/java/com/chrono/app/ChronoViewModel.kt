@@ -211,6 +211,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
                 targetDistUnit = pendingTargetDistUnit,
             )
             results.add(0, rec)
+            rec.shotFolder = session.logShot(shotJson(rec))
             persist()
             prefs.edit()
                 .putString("pendTool", pendingTool)
@@ -218,7 +219,6 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
                 .putString("pendTdVal", pendingTargetDistVal)
                 .putString("pendTdUnit", pendingTargetDistUnit)
                 .apply()
-            session.logShot(shotJson(rec))
             newShots.add(rec)   // review dialog first; photos prompt on dismiss
             // A real shot destroys both break-screens: force re-verify (and the
             // sensor-attach flow re-measures the fresh screen's load).
@@ -265,6 +265,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         velocity: Double?,
         velocityIsFps: Boolean,
         epochMillis: Long?,
+        photos: List<Uri> = emptyList(),
     ) {
         val mps = velocity?.let { if (velocityIsFps) it / 3.28084 else it }
         val rec = TestResult(
@@ -282,9 +283,23 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
             manualVelocityMps = mps,
         )
         results.add(0, rec)
+        rec.shotFolder = session.logShot(shotJson(rec))
+        for (uri in photos) session.importPhoto(rec.shotFolder, uri)
         persist()
-        session.logShot(shotJson(rec))
         promptPhotos("after")
+    }
+
+    /** Copy user-picked images into a result's shot folder (edit dialog). */
+    fun attachPhotosToResult(uid: String, uris: List<Uri>) {
+        val idx = results.indexOfFirst { it.uid == uid }
+        if (idx < 0 || uris.isEmpty()) return
+        val r = results[idx]
+        val rel = session.folderForResult(r.shotFolder, r.uid)
+        if (r.shotFolder.isBlank()) {
+            results[idx] = r.copy(shotFolder = rel)
+            persist()
+        }
+        for (uri in uris) session.importPhoto(rel, uri)
     }
 
     /** The per-shot log file written into the shot's folder. */
@@ -397,30 +412,45 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
      * automatically tightens this — no app change needed.
      */
     fun ciPercentFor(r: TestResult): Double {
+        if (r.isManual || r.splitNs <= 0 || r.distanceM <= 0) return 0.0
+        return ciPercentRaw(r.splitNs.toDouble(), r.distanceM)
+    }
+
+    /** Expected CI at the current gate spacing for a reference velocity —
+     *  shows directly how much a short spacing costs in confidence. */
+    fun estimatedCiAtCurrentSpacing(fps: Double = 3000.0): Double? {
+        if (distanceM <= 0) return null
+        val splitNs = distanceM / (fps / 3.28084) * 1e9
+        return ciPercentRaw(splitNs, distanceM)
+    }
+
+    private fun ciPercentRaw(splitNs: Double, gateM: Double): Double {
         val hw = ble.hwInfo.value ?: HwInfo.DEFAULT
-        val t = r.splitNs.toDouble()
-        if (t <= 0 || r.distanceM <= 0) return 0.0
         val tickNs = hw.tickPs / 1000.0
         val jitterNs = hw.edgeJitterNs * sqrt(2.0)             // two independent edges
-        val clockNs = t * hw.clockPpm / 1_000_000.0
+        val clockNs = splitNs * hw.clockPpm / 1_000_000.0
         val residualNs = (channelMismatchNs() ?: 200L) / 10.0  // cal->live impedance scale
         val sigmaT = sqrt(jitterNs * jitterNs + tickNs * tickNs + clockNs * clockNs) + residualNs
         val sigmaD = 0.0005                                    // 0.5 mm spacing uncertainty
-        val rel = sqrt((sigmaT / t).pow(2.0) + (sigmaD / r.distanceM).pow(2.0))
+        val rel = sqrt((sigmaT / splitNs).pow(2.0) + (sigmaD / gateM).pow(2.0))
         return 2 * rel * 100
     }
 
     // ---------------------------------------------------------- setup flow
 
+    // The wizard sensor steps no longer arm the input on entry — the user
+    // first confirms the sensor is plugged in (attach step), and only then
+    // does beginTapTest() start listening for the test tap.
     fun continueToSensor1() {
         screen = Screen.SENSOR1
-        ble.sendCommand(Proto.CMD_VERIFY1)
     }
 
     fun continueToSensor2() {
         screen = Screen.SENSOR2
-        ble.sendCommand(Proto.CMD_VERIFY2)
     }
+
+    /** Sim stand-in for physically tapping the sensor under test. */
+    fun simulateTap() = ble.simulateSensorTap()
 
     private var inWizard = false
 

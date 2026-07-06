@@ -27,6 +27,8 @@ data class TestResult(
     var outcome: String = "",
     /** set on manual entries (deviceResultId < 0) that were typed in, not measured */
     var manualVelocityMps: Double? = null,
+    /** folder id under ChronoData holding this shot's log and photos */
+    var shotFolder: String = "",
 ) {
     val isManual: Boolean get() = deviceResultId < 0
     val splitSeconds: Double get() = splitNs / 1_000_000_000.0
@@ -95,6 +97,7 @@ class ResultStore(context: Context) {
                     target = o.optString("target", ""),
                     outcome = o.optString("outcome", ""),
                     manualVelocityMps = o.optDouble("manualVelocityMps").takeIf { !it.isNaN() },
+                    shotFolder = o.optString("shotFolder", ""),
                 )
             }
         }.getOrDefault(emptyList())
@@ -115,6 +118,7 @@ class ResultStore(context: Context) {
                     .put("targetDistUnit", r.targetDistUnit)
                     .put("target", r.target)
                     .put("outcome", r.outcome)
+                    .put("shotFolder", r.shotFolder)
                     .apply {
                         r.targetDistValue?.let { put("targetDistValue", it) }
                         r.manualVelocityMps?.let { put("manualVelocityMps", it) }

@@ -322,11 +322,20 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                                 }
                             }
                         }
-                        else -> VerifyPane(
-                            sensor = sensor,
-                            deviceState = state,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+                        else -> {
+                            VerifyPane(
+                                sensor = sensor,
+                                deviceState = state,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            if (vm.isSimulation && !verified) {
+                                Spacer(Modifier.height(12.dp))
+                                Button(
+                                    onClick = { vm.simulateTap() },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) { Text("Simulate sensor tap") }
+                            }
+                        }
                     }
                 }
             },
@@ -408,6 +417,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                 vm.updateResult(r.uid, label, tool, target, tdVal, tdUnit, outcome, epochMillis)
                 editing = null
             },
+            onAttachPhotos = { uris -> vm.attachPhotosToResult(r.uid, uris) },
             onDelete = {
                 vm.deleteResult(r.uid)
                 editing = null
@@ -419,8 +429,10 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
         ManualEntryDialog(
             vm = vm,
             onDismiss = { manualEntry = false },
-            onSave = { label, tool, target, tdVal, tdUnit, outcome, vel, velFps, epoch ->
-                vm.addManualEntry(label, tool, target, tdVal, tdUnit, outcome, vel, velFps, epoch)
+            onSave = { label, tool, target, tdVal, tdUnit, outcome, vel, velFps, epoch, photos ->
+                vm.addManualEntry(
+                    label, tool, target, tdVal, tdUnit, outcome, vel, velFps, epoch, photos,
+                )
                 manualEntry = false
             },
         )
@@ -477,6 +489,11 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
 private fun TopBar(vm: ChronoViewModel, connState: ConnState, deviceStatus: DeviceStatus?) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
+            Text(
+                "JERAL INNOVATIONS",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextDim,
+            )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("CHRONO", style = MaterialTheme.typography.headlineMedium, color = Amber)
                 if (vm.isSimulation) {
@@ -575,6 +592,13 @@ private fun RigCard(vm: ChronoViewModel, enabled: Boolean) {
                         style = MaterialTheme.typography.labelSmall,
                         color = TextDim,
                     )
+                    vm.estimatedCiAtCurrentSpacing()?.let { ci ->
+                        Text(
+                            "≈ ±%.1f%% CI here".format(ci),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (ci > 2.0) Amber else TextDim,
+                        )
+                    }
                 }
                 SensorGraphic(2, vm.sensor2Ready, enabled) { vm.startRetest(2) }
             }
@@ -1049,8 +1073,18 @@ private fun EditResultDialog(
         targetDistValue: Double?, targetDistUnit: String,
         outcome: String, epochMillis: Long?,
     ) -> Unit,
+    onAttachPhotos: (List<android.net.Uri>) -> Unit,
     onDelete: () -> Unit,
 ) {
+    var attachedNow by remember { mutableStateOf(0) }
+    val pickImages = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            onAttachPhotos(uris)
+            attachedNow += uris.size
+        }
+    }
     var label by remember { mutableStateOf(result.label) }
     var tool by remember { mutableStateOf(result.tool) }
     var target by remember { mutableStateOf(result.target) }
@@ -1137,6 +1171,15 @@ private fun EditResultDialog(
                         "Device clock wasn't synced for this test" else null,
                 )
                 Spacer(Modifier.height(6.dp))
+                TextButton(onClick = { pickImages.launch("image/*") }) {
+                    Icon(Icons.Filled.PhotoCamera, null, tint = Teal, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.size(6.dp))
+                    Text(
+                        if (attachedNow == 0) "Add photos to this shot"
+                        else "Add photos ($attachedNow added)",
+                        color = Teal,
+                    )
+                }
                 TextButton(onClick = onDelete) {
                     Icon(Icons.Filled.Delete, null, tint = Bad, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.size(6.dp))
@@ -1170,8 +1213,13 @@ private fun ManualEntryDialog(
         label: String, tool: String, target: String,
         targetDistValue: Double?, targetDistUnit: String, outcome: String,
         velocity: Double?, velocityIsFps: Boolean, epochMillis: Long?,
+        photos: List<android.net.Uri>,
     ) -> Unit,
 ) {
+    var pickedPhotos by remember { mutableStateOf<List<android.net.Uri>>(emptyList()) }
+    val pickImages = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetMultipleContents()
+    ) { uris -> pickedPhotos = pickedPhotos + uris }
     var label by remember { mutableStateOf(vm.pendingLabel) }
     var tool by remember { mutableStateOf(vm.pendingTool) }
     var target by remember { mutableStateOf(vm.pendingTarget) }
@@ -1287,6 +1335,16 @@ private fun ManualEntryDialog(
                     isError = dateError,
                     supporting = null,
                 )
+                Spacer(Modifier.height(4.dp))
+                TextButton(onClick = { pickImages.launch("image/*") }) {
+                    Icon(Icons.Filled.PhotoCamera, null, tint = Teal, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.size(6.dp))
+                    Text(
+                        if (pickedPhotos.isEmpty()) "Add photos"
+                        else "Add photos (${pickedPhotos.size} selected)",
+                        color = Teal,
+                    )
+                }
             }
         },
         confirmButton = {
@@ -1296,6 +1354,7 @@ private fun ManualEntryDialog(
                         label.trim(), tool.trim(), target.trim(),
                         tdVal.replace(',', '.').toDoubleOrNull(), tdUnit, outcome.trim(),
                         velText.replace(',', '.').toDoubleOrNull(), velIsFps, parsedDate,
+                        pickedPhotos,
                     )
                 },
                 enabled = !dateError,

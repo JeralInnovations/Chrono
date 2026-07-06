@@ -67,19 +67,21 @@ class SessionManager(private val context: Context) {
         save()
     }
 
-    private fun shotRelPath(): String =
-        "Documents/ChronoData/${ensureSession()}/Shot_%04d".format(shotIndex)
+    /** Folder id relative to ChronoData, e.g. "Test_2026-07-06_1432/Shot_0004". */
+    private fun currentShotRel(): String = "${ensureSession()}/Shot_%04d".format(shotIndex)
 
     /** Setup photos belong to the NEXT shot; after photos stay with the last. */
     fun newPhotoUri(kind: String): Uri? {
         if (shotIndex == 0 || (kind == "setup" && shotLogged)) newShot()
         val name = "${kind}_${System.currentTimeMillis()}.jpg"
-        return createUri(name, "image/jpeg")
+        return createUriAt(currentShotRel(), name, "image/jpeg")
     }
 
-    fun logShot(json: JSONObject) {
+    /** Writes the log into its shot folder; returns the folder id for the record. */
+    fun logShot(json: JSONObject): String {
         if (shotIndex == 0 || shotLogged) newShot()
-        createUri("shot.json", "application/json")?.let { uri ->
+        val rel = currentShotRel()
+        createUriAt(rel, "shot.json", "application/json")?.let { uri ->
             runCatching {
                 context.contentResolver.openOutputStream(uri)?.use {
                     it.write(json.toString(2).toByteArray())
@@ -88,14 +90,34 @@ class SessionManager(private val context: Context) {
         }
         shotLogged = true
         save()
+        return rel
     }
 
-    private fun createUri(displayName: String, mime: String): Uri? =
+    /** Folder for attaching photos to an existing record; never disturbs the
+     *  active shot counters (older records get their own side folder). */
+    fun folderForResult(existingRel: String?, uidHint: String): String =
+        if (!existingRel.isNullOrBlank()) existingRel
+        else "${ensureSession()}/Shot_extra_${uidHint.take(8)}"
+
+    /** Copy a user-picked image (gallery etc.) into the given shot folder. */
+    fun importPhoto(rel: String, source: Uri): Boolean {
+        val dest = createUriAt(rel, "attached_${System.currentTimeMillis()}.jpg", "image/jpeg")
+            ?: return false
+        return runCatching {
+            context.contentResolver.openInputStream(source)!!.use { input ->
+                context.contentResolver.openOutputStream(dest)!!.use { out ->
+                    input.copyTo(out)
+                }
+            }
+        }.isSuccess
+    }
+
+    private fun createUriAt(rel: String, displayName: String, mime: String): Uri? =
         if (useMediaStore) {
             val cv = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
                 put(MediaStore.MediaColumns.MIME_TYPE, mime)
-                put(MediaStore.MediaColumns.RELATIVE_PATH, shotRelPath())
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "Documents/ChronoData/$rel")
             }
             runCatching {
                 context.contentResolver.insert(MediaStore.Files.getContentUri("external"), cv)
@@ -103,7 +125,7 @@ class SessionManager(private val context: Context) {
         } else {
             val dir = File(
                 context.getExternalFilesDir(null) ?: context.filesDir,
-                "ChronoData/${ensureSession()}/Shot_%04d".format(shotIndex),
+                "ChronoData/$rel",
             )
             dir.mkdirs()
             runCatching {

@@ -201,6 +201,8 @@ fun SensorSetupScreen(
     connState: ConnState,
     onContinue: () -> Unit,
 ) {
+    // Attach first (nothing armed), then the user-acknowledged tap test.
+    var tapStarted by remember(sensor) { mutableStateOf(false) }
     // Latch: the device wanders through CALIBRATING after the trigger test,
     // so remember locally that this sensor already passed.
     var wasVerified by remember(sensor) { mutableStateOf(false) }
@@ -218,6 +220,7 @@ fun SensorSetupScreen(
     }
 
     val loadNs = vm.channelLoadNs(sensor)
+    val role = if (sensor == 1) "START" else "STOP"
 
     Column(
         modifier = Modifier.fillMaxSize().padding(28.dp).verticalScroll(rememberScrollState()),
@@ -236,7 +239,44 @@ fun SensorSetupScreen(
             Spacer(Modifier.height(16.dp))
         }
 
-        VerifyPane(sensor = sensor, deviceState = deviceState, verifiedOverride = wasVerified)
+        if (!tapStarted && !wasVerified) {
+            // ---- attach step: nothing armed, take your time
+            Text(
+                "SENSOR $sensor — $role",
+                style = MaterialTheme.typography.labelLarge,
+                color = Amber,
+            )
+            Spacer(Modifier.height(20.dp))
+            TerminalGraphic(pulsing = false, verified = false)
+            Spacer(Modifier.height(24.dp))
+            Text(
+                "1.  Press the spring clips and insert the $role sensor leads " +
+                    "into port $sensor.",
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "2.  Route and secure the wire. Nothing is armed yet — movement " +
+                    "can't trigger anything.",
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(24.dp))
+            Button(
+                onClick = { vm.beginTapTest(sensor); tapStarted = true },
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+            ) { Text("Sensor plugged in — start tap test") }
+        } else {
+            VerifyPane(sensor = sensor, deviceState = deviceState, verifiedOverride = wasVerified)
+            if (vm.isSimulation && !wasVerified) {
+                Spacer(Modifier.height(16.dp))
+                Button(
+                    onClick = { vm.simulateTap() },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Simulate sensor tap") }
+            }
+        }
 
         if (wasVerified) {
             Spacer(Modifier.height(16.dp))
