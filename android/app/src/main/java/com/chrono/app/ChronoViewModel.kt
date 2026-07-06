@@ -52,8 +52,11 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
 
     private val setupDone: Boolean get() = prefs.getBoolean("setupDone", false)
 
+    val isSimulation: Boolean get() = ble.isSimulation
+
     init {
         results.addAll(store.load())
+        ble.simDistanceM = distanceM
         viewModelScope.launch { ble.results.collect { onRawResult(it) } }
         viewModelScope.launch {
             ble.connState.collect { cs ->
@@ -134,6 +137,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     fun saveDistance(value: Double, unit: DistanceUnit) {
         distanceValue = value
         distanceUnit = unit
+        ble.simDistanceM = distanceM
         prefs.edit()
             .putFloat("distanceValue", value.toFloat())
             .putString("unit", unit.name)
@@ -166,6 +170,9 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun disconnect() = ble.disconnect()
+
+    fun connectSimulated() = ble.connectSimulated()
+    fun simulateSignalLoss() = ble.simulateSignalLoss()
 
     override fun onCleared() {
         ble.disconnect()

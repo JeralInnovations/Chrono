@@ -112,6 +112,29 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
             item { ReconnectingBanner() }
         }
 
+        if (vm.isSimulation) {
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Teal.copy(alpha = 0.10f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Simulation mode — no hardware connected.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Teal,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(
+                        onClick = { vm.simulateSignalLoss() },
+                        enabled = connState == ConnState.CONNECTED,
+                    ) { Text("Drop signal", color = Teal) }
+                }
+            }
+        }
+
         item { SensorsCard(vm, enabled = connState == ConnState.CONNECTED && !armed && !running) }
 
         item { NextTestCard(vm, armed = armed || running) }
@@ -182,7 +205,20 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
 private fun TopBar(vm: ChronoViewModel, connState: ConnState, deviceStatus: DeviceStatus?) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text("CHRONO", style = MaterialTheme.typography.headlineMedium, color = Amber)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("CHRONO", style = MaterialTheme.typography.headlineMedium, color = Amber)
+                if (vm.isSimulation) {
+                    Spacer(Modifier.size(10.dp))
+                    Text(
+                        "SIM",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Teal,
+                        modifier = Modifier
+                            .background(Teal.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 7.dp, vertical = 3.dp),
+                    )
+                }
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val (icon, tint, label) = when (connState) {
                     ConnState.CONNECTED ->

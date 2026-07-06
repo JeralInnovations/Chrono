@@ -154,6 +154,16 @@ Each result shows **ft/s**, **m/s**, and the raw **split in milliseconds**
 
 ---
 
+## 4a. Simulation mode (no hardware needed)
+
+At the bottom of the connect screen, tap **"Try it without a device (simulation)"**
+to walk the entire UI with no chronograph present — handy for demos or trying the
+app before the hardware is built. A fake device drives the same screens the real
+one does: the sensor-verify steps auto-acknowledge after a moment, **ARM** produces
+a realistic randomized shot for the configured gap, time-sync works, and a **"Drop
+signal"** button on the dashboard briefly forces the reconnect state so you can see
+that banner. A small **SIM** badge marks the session. Tap *Disconnect* to leave.
+
 ## 5. Design notes & limits
 
 - **Timing accuracy** — the split is captured entirely in hardware

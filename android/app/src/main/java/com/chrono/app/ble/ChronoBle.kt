@@ -15,8 +15,14 @@ import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.os.ParcelUuid
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.UUID
@@ -117,12 +123,120 @@ class ChronoBle(private val context: Context) {
     }
 
     fun disconnect() {
+        if (isSimulation) {
+            simJob?.cancel()
+            isSimulation = false
+            status.value = null
+            connState.value = ConnState.DISCONNECTED
+            return
+        }
         userDisconnected = true
         synchronized(opLock) { opQueue.clear(); opInFlight = false }
         runCatching { gatt?.disconnect(); gatt?.close() }
         gatt = null
         status.value = null
         connState.value = ConnState.DISCONNECTED
+    }
+
+    // ------------------------------------------------------------ simulation
+    // A fake device so the whole UI can be exercised with no hardware. It
+    // drives the same status/result flows the real GATT path does, so every
+    // screen behaves identically — verify steps auto-acknowledge, ARM produces
+    // a realistic shot, and signal loss can be triggered on demand.
+
+    var isSimulation = false
+        private set
+
+    /** Gate spacing in meters, kept in sync by the ViewModel so simulated
+     *  splits map to believable velocities regardless of the configured gap. */
+    var simDistanceM: Double = 0.1524   // 6 in default
+
+    private val simScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var simJob: Job? = null
+    private var simState = Proto.ST_IDLE
+    private var simPending = 0
+    private var simTimeValid = false
+    private var simNextId = 1
+
+    fun connectSimulated() {
+        stopScan()
+        isSimulation = true
+        simState = Proto.ST_IDLE
+        simPending = 0
+        simTimeValid = false
+        pushSimStatus()
+        connState.value = ConnState.CONNECTED
+    }
+
+    /** Briefly drop to RECONNECTING so the reconnect banner can be seen. */
+    fun simulateSignalLoss() {
+        if (!isSimulation) return
+        simScope.launch {
+            connState.value = ConnState.RECONNECTING
+            delay(2600)
+            connState.value = ConnState.CONNECTED
+        }
+    }
+
+    private fun pushSimStatus() {
+        status.value = DeviceStatus(simState, simPending, simTimeValid)
+    }
+
+    private fun simCommand(cmd: Byte, arg: Int) {
+        when (cmd) {
+            Proto.CMD_VERIFY1 -> simVerify(1)
+            Proto.CMD_VERIFY2 -> simVerify(2)
+            Proto.CMD_ARM -> simArm()
+            Proto.CMD_DISARM, Proto.CMD_CANCEL -> {
+                simJob?.cancel()
+                simState = Proto.ST_IDLE
+                pushSimStatus()
+            }
+            Proto.CMD_ACK -> {
+                if (simPending > 0) simPending--
+                pushSimStatus()
+            }
+            Proto.CMD_FETCH -> Unit   // nothing buffered in simulation
+        }
+    }
+
+    private fun simVerify(sensor: Int) {
+        simJob?.cancel()
+        simState = if (sensor == 1) Proto.ST_VERIFY1 else Proto.ST_VERIFY2
+        pushSimStatus()
+        simJob = simScope.launch {
+            delay(1400)   // stand in for the user triggering the sensor
+            simState = if (sensor == 1) Proto.ST_VERIFY1_OK else Proto.ST_VERIFY2_OK
+            pushSimStatus()
+        }
+    }
+
+    private fun simArm() {
+        simJob?.cancel()
+        simState = Proto.ST_ARMED
+        pushSimStatus()
+        simJob = simScope.launch {
+            delay(1800)                    // waiting for the shot
+            simState = Proto.ST_RUNNING
+            pushSimStatus()
+            delay(350)                     // shot in flight
+            val split = simSplitNs()
+            val epoch = if (simTimeValid) System.currentTimeMillis() / 1000L else 0L
+            simPending++
+            pushSimStatus()
+            results.tryEmit(RawResult(simNextId++, split, epoch))
+            simState = Proto.ST_IDLE
+            pushSimStatus()
+        }
+    }
+
+    /** A split that yields a random, realistic muzzle velocity for the set gap. */
+    private fun simSplitNs(): Long {
+        val fps = (900..3200).random().toDouble()
+        val mps = fps / 3.28084
+        val d = if (simDistanceM > 0) simDistanceM else 0.1524
+        val seconds = d / mps
+        return (seconds * 1_000_000_000.0).toLong().coerceAtLeast(1)
     }
 
     // ---------------------------------------- serialized GATT operation queue
@@ -160,6 +274,7 @@ class ChronoBle(private val context: Context) {
 
     @Suppress("DEPRECATION")
     fun sendCommand(cmd: Byte, arg: Int = 0) {
+        if (isSimulation) { simCommand(cmd, arg); return }
         val payload = byteArrayOf(cmd, (arg and 0xFF).toByte(), ((arg shr 8) and 0xFF).toByte())
         enqueue {
             val g = gatt ?: return@enqueue false
@@ -173,6 +288,7 @@ class ChronoBle(private val context: Context) {
     /** Push the phone's current time to the device (unix seconds, little-endian). */
     @Suppress("DEPRECATION")
     fun syncTime() {
+        if (isSimulation) { simTimeValid = true; pushSimStatus(); return }
         val epoch = (System.currentTimeMillis() / 1000L).toInt()
         val payload = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(epoch).array()
         enqueue {

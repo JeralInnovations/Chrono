@@ -18,13 +18,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BluetoothSearching
+import androidx.compose.material.icons.filled.PlayCircleOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -140,6 +143,21 @@ fun ConnectScreen(vm: ChronoViewModel, connState: ConnState) {
                     }
                 }
             }
+        }
+
+        // Always reachable — lets the UI be exercised with no hardware present.
+        Spacer(Modifier.weight(1f))
+        HorizontalDivider(
+            Modifier.padding(vertical = 16.dp),
+            color = MaterialTheme.colorScheme.outline,
+        )
+        TextButton(onClick = { vm.connectSimulated() }) {
+            Icon(
+                Icons.Filled.PlayCircleOutline, null,
+                tint = TextDim, modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.size(8.dp))
+            Text("Try it without a device (simulation)", color = TextDim)
         }
     }
 }
