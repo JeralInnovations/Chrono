@@ -14,6 +14,7 @@ fun ChronoApp(vm: ChronoViewModel) {
 
     when (vm.screen) {
         Screen.CONNECT -> ConnectScreen(vm, connState)
+        Screen.BASELINE -> BaselineScreen(vm, connState)
         Screen.SENSOR1 -> SensorSetupScreen(
             vm = vm,
             sensor = 1,

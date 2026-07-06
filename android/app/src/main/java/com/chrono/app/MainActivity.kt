@@ -5,13 +5,17 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -35,12 +39,21 @@ import com.chrono.app.ui.theme.ChronoTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Draw behind the system bars but keep light icons (the app is always
+        // dark), then inset our own content so the status bar and gesture/nav
+        // area never cover it.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+        )
         setContent {
             ChronoTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    PermissionGate {
-                        val vm: ChronoViewModel = viewModel()
-                        ChronoApp(vm)
+                    Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+                        PermissionGate {
+                            val vm: ChronoViewModel = viewModel()
+                            ChronoApp(vm)
+                        }
                     }
                 }
             }

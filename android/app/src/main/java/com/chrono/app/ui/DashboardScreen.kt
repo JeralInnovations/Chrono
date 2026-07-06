@@ -31,6 +31,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -136,6 +137,13 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
         }
 
         item { SensorsCard(vm, enabled = connState == ConnState.CONNECTED && !armed && !running) }
+
+        item {
+            ChannelsCard(
+                vm,
+                enabled = connState == ConnState.CONNECTED && !armed && !running && !vm.calRunning,
+            )
+        }
 
         item { NextTestCard(vm, armed = armed || running) }
 
@@ -272,6 +280,67 @@ private fun SensorsCard(vm: ChronoViewModel, enabled: Boolean) {
                     style = MaterialTheme.typography.bodyLarge,
                 )
                 OutlinedButton(onClick = { vm.changeDistance() }, enabled = enabled) { Text("Change") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChannelsCard(vm: ChronoViewModel, enabled: Boolean) {
+    val load1 = vm.channelLoadNs(1)
+    val load2 = vm.channelLoadNs(2)
+    val mismatch = vm.channelMismatchNs()
+    val hasBaseline = vm.calData.containsKey("b1") && vm.calData.containsKey("b2")
+
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(Modifier.fillMaxWidth().padding(18.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Channel calibration",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                if (vm.calRunning) {
+                    CircularProgressIndicator(
+                        color = Amber, modifier = Modifier.size(18.dp), strokeWidth = 2.dp,
+                    )
+                } else {
+                    OutlinedButton(
+                        onClick = { vm.recalibrateChannels() },
+                        enabled = enabled && hasBaseline,
+                    ) { Text("Recheck") }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            for ((ch, load) in listOf(1 to load1, 2 to load2)) {
+                Text(
+                    if (load != null)
+                        "Port $ch load:  +%.2f µs  (≈ %d pF)".format(load / 1000.0, (load / 12.0).toInt())
+                    else "Port $ch load:  — not measured",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextDim,
+                )
+                Spacer(Modifier.height(4.dp))
+            }
+            Spacer(Modifier.height(6.dp))
+            when {
+                !hasBaseline -> Text(
+                    "No baseline captured — rerun setup with empty ports to enable.",
+                    style = MaterialTheme.typography.bodyMedium, color = TextDim,
+                )
+                mismatch == null -> Text(
+                    "Plug in and measure both sensors to compare channels.",
+                    style = MaterialTheme.typography.bodyMedium, color = TextDim,
+                )
+                mismatch < 600 -> Text(
+                    "Channels matched  (Δ $mismatch ns — timing impact negligible)",
+                    style = MaterialTheme.typography.bodyMedium, color = Good,
+                )
+                else -> Text(
+                    "Channel mismatch Δ $mismatch ns (≈ ${(mismatch / 12.0).toInt()} pF) — " +
+                        "check that both cables are the same length and type.",
+                    style = MaterialTheme.typography.bodyMedium, color = Amber,
+                )
             }
         }
     }

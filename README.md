@@ -24,28 +24,34 @@ Each "sensor" is anything that momentarily **connects a pin to 3.3 V** — a swi
 a make-screen, a break-beam circuit driving a transistor, etc. The pins use the
 chip's internal pull-**down** resistors, so they sit at 0 V until a sensor fires.
 
-```
-XIAO nRF52840 (USB connector facing up, left column top-to-bottom)
+Each channel has a piezo front-end and a calibration charge path:
 
-        ┌─────USB─────┐
-   D0 ──┤ 0        5V ├──
-   D1 ──┤ 1       GND ├──
-        │ 2       3V3 ├──┬────────────┐
-        │ ...         │  │            │
-        └─────────────┘  │            │
-                         │            │
-  Speaker terminal 1:    │            │
-    (+) red clip ── 3V3 ─┘            │
-    (–) blk clip ── D0  ← START       │
-                                      │
-  Speaker terminal 2:                 │
-    (+) red clip ── 3V3 ──────────────┘
-    (–) blk clip ── D1  ← STOP
+```
+                        1k                          node
+  piezo (+) ───────────/\/\/\────────────┬──────────── D0 (ch 1) / D1 (ch 2)
+  piezo (–) ── GND                       │
+                                 Schottky│clamps
+                          3V3 ──|<|──────┤   (cathode to 3V3: clamps positive)
+                          GND ──|>|──────┘   (anode to GND: clamps negative)
+                                         │
+                        10k 1%           │
+  D2 (ch 1) / D3 (ch 2) ──/\/\/\─────────┘   calibration charge path
 ```
 
-Mount one two-port spring-loaded speaker terminal per sensor: one port lead goes
-to **3V3**, the other to **D0** (sensor 1) or **D1** (sensor 2). Polarity does not
-actually matter electrically — the red/black convention just keeps wiring tidy.
+Per channel:
+
+| From | Component | To |
+|---|---|---|
+| Piezo + | 1 kΩ series resistor | sensor node |
+| Sensor node | — | **D0** (ch 1) / **D1** (ch 2) |
+| Sensor node | Schottky, anode at node | **3V3** (positive clamp) |
+| Sensor node | Schottky, cathode at node | **GND** (negative clamp) |
+| **D2** (ch 1) / **D3** (ch 2) | 10 kΩ **1% metal film** | sensor node |
+| Piezo – | wire | **GND** |
+
+The 10 k charge resistors are only used for calibration; those pins are held in
+true hi-Z during live fire so they don't load the node. Match the two channels —
+same piezo type, same clamp diodes, and **the same cable length** (~5 ns/m).
 
 > ⚠️ Use **3V3**, not 5V. The nRF52840 pins are 3.3 V only.
 
@@ -127,13 +133,23 @@ it (allow "install from unknown sources" when asked).
 
 1. **Connect** — open the app, grant the Bluetooth permission, power the device.
    It appears in the list; tap it.
-2. **Sensor 1 (START)** — the app shows the spring-terminal graphic. Insert the
-   START sensor leads into port 1, then trigger the sensor once. The graphic
-   glows green and the app acknowledges. Tap *Continue*.
-3. **Sensor 2 (STOP)** — same procedure for port 2.
-4. **Sensor spacing** — enter the measured distance between the sensors
+2. **Port baseline** — with both ports EMPTY, the app measures each bare port's
+   electrical signature (an RC sweep through the 10 k calibration resistor).
+   Keep the device still during the sweep.
+3. **Sensor 1 (START)** — insert the START sensor leads into port 1, then
+   trigger the sensor once. The graphic glows green, and the app automatically
+   re-measures the channel with the sensor attached — the difference against
+   the baseline isolates the cable+sensor load. If the reading looks like an
+   empty port, the app warns you the sensor may not be plugged in.
+4. **Sensor 2 (STOP)** — same procedure for port 2.
+5. **Sensor spacing** — enter the measured distance between the sensors
    (inches by default; mm / cm / ft also available). Velocity is computed from
-   this, so measure carefully.
+   this, so measure carefully. At a 6 in gap, 0.02 in of error is 1%.
+
+The dashboard's **Channel calibration** card shows each port's measured load
+(≈ pF) and flags whether the two channels are matched; **Recheck** reruns the
+loaded sweep any time (sensors attached, undisturbed). Every sweep is appended
+to `cal_history.jsonl` in the app's private storage for later analysis.
 5. **Dashboard** — from here you can:
    - **Retest 1 / Retest 2** — re-run either sensor test any time
    - **Change** — edit the sensor spacing
@@ -196,7 +212,9 @@ Service `a5c40001-9d95-4e4c-8c5a-c1d6f2a80de1`
 | Control | `a5c40003` | write | `[cmd, argLo, argHi]` |
 | Result  | `a5c40004` | read/notify | `id:u16, splitNs:u32, epoch:u32, flags:u8` (LE) |
 | Time    | `a5c40005` | write | unix seconds `u32` (LE) |
+| Cal     | `a5c40006` | read/notify | `ch:u8, status:u8, n:u16, median:u32, mean:u32, stddev:u32, min:u32` ns (LE) |
 
-States: 0 idle · 1/3 verifying sensor 1/2 · 2/4 sensor 1/2 OK · 5 armed · 6 running.
+States: 0 idle · 1/3 verifying sensor 1/2 · 2/4 sensor 1/2 OK · 5 armed ·
+6 running · 7 calibrating.
 Commands: 1/2 verify sensor 1/2 · 3 arm · 4 disarm · 5 ack result (arg=id) ·
-6 cancel · 7 re-send stored results.
+6 cancel · 7 re-send stored results · 8 calibrate (arg=channel).

@@ -40,6 +40,8 @@
 // ---------------------------------------------------------------- pins
 const uint8_t SENSOR1_PIN = 0;   // XIAO pin labeled "0" (D0) — START
 const uint8_t SENSOR2_PIN = 1;   // XIAO pin labeled "1" (D1) — STOP
+const uint8_t CHARGE1_PIN = 2;   // D2 -> 10k 1% -> sensor-1 node (calibration)
+const uint8_t CHARGE2_PIN = 3;   // D3 -> 10k 1% -> sensor-2 node (calibration)
 
 // Hardware channels for the capture path. The S140 SoftDevice reserves
 // PPI channels 17-31 and groups 4-5, so low numbers are free for us.
@@ -49,6 +51,9 @@ const uint8_t PPI_S1     = 0;
 const uint8_t PPI_S2     = 1;
 const uint8_t PPI_GRP_S1 = 0;
 const uint8_t PPI_GRP_S2 = 1;
+const uint8_t GPIOTE_C1  = 2;   // task-mode channels driving the charge pins
+const uint8_t GPIOTE_C2  = 3;
+const uint8_t PPI_LAUNCH = 2;   // TIMER2 compare -> charge-pin SET (cal launch)
 
 const uint32_t TIMER_HZ = 16000000UL;   // TIMER2 @ 16 MHz, PRESCALER 0
 
@@ -62,6 +67,7 @@ enum : uint8_t {
   ST_VERIFY2_OK = 4,
   ST_ARMED      = 5,  // standby: waiting for sensor 1
   ST_RUNNING    = 6,  // sensor 1 tripped, waiting for sensor 2
+  ST_CALIBRATING = 7, // measuring a channel's RC signature
 };
 
 // Commands written to the CONTROL characteristic: [cmd, argLo, argHi]
@@ -73,6 +79,7 @@ enum : uint8_t {
   CMD_ACK     = 5,  // arg = result id; phone has stored it, delete here
   CMD_CANCEL  = 6,  // back to idle from any state
   CMD_FETCH   = 7,  // re-send every stored (un-acked) result
+  CMD_CALIBRATE = 8, // arg = channel (1|2): run an RC calibration sweep
 };
 
 // 128-bit UUIDs. Base: A5C4xxxx-9D95-4E4C-8C5A-C1D6F2A80DE1
@@ -87,12 +94,14 @@ const uint8_t UUID_STATUS [16] = CHRONO_UUID(0x0002);
 const uint8_t UUID_CONTROL[16] = CHRONO_UUID(0x0003);
 const uint8_t UUID_RESULT [16] = CHRONO_UUID(0x0004);
 const uint8_t UUID_TIME   [16] = CHRONO_UUID(0x0005);
+const uint8_t UUID_CAL    [16] = CHRONO_UUID(0x0006);
 
 BLEService        svc     (UUID_SERVICE);
 BLECharacteristic chStatus (UUID_STATUS);   // read/notify: [state, pendingCount, timeValid]
 BLECharacteristic chControl(UUID_CONTROL);  // write: commands
 BLECharacteristic chResult (UUID_RESULT);   // read/notify: Result struct below
 BLECharacteristic chTime   (UUID_TIME);     // write: uint32 LE unix seconds
+BLECharacteristic chCal    (UUID_CAL);      // read/notify: CalResult struct below
 
 // One measurement. 11 bytes, little-endian — parsed byte-for-byte by the app.
 struct __attribute__((packed)) Result {
@@ -109,6 +118,17 @@ Result   pending[MAX_PENDING];
 uint8_t  pendingCount = 0;
 uint16_t nextId       = 1;
 
+// One calibration sweep summary. 20 bytes LE — fits a default-MTU notification.
+struct __attribute__((packed)) CalResult {
+  uint8_t  channel;   // 1 or 2
+  uint8_t  status;    // 0 ok, 1 some samples timed out, 2 no valid samples
+  uint16_t samples;   // valid samples included in the stats
+  uint32_t medianNs;  // median time-to-threshold
+  uint32_t meanNs;
+  uint32_t stddevNs;
+  uint32_t minNs;
+};
+
 // ------------------------------------------------------- run-time state
 uint8_t  state    = ST_IDLE;
 bool     armed    = false;
@@ -117,6 +137,7 @@ bool     finished = false;
 
 bool     fetchRequested = false;
 bool     hfxoOn         = false;
+volatile uint8_t calRequested = 0;   // 1 or 2; handled in loop()
 
 // ACK ids are queued here from the BLE callback and applied in loop(), so
 // the pending[] buffer is only ever mutated from one context.
@@ -135,6 +156,11 @@ void setupTiming() {
 
   nrf_gpio_cfg_input(p1, NRF_GPIO_PIN_PULLDOWN);
   nrf_gpio_cfg_input(p2, NRF_GPIO_PIN_PULLDOWN);
+
+  // Charge pins idle in true hi-Z (input buffer disconnected) so they never
+  // load the sensor nodes during live fire.
+  nrf_gpio_cfg_default(g_ADigitalPinMap[CHARGE1_PIN]);
+  nrf_gpio_cfg_default(g_ADigitalPinMap[CHARGE2_PIN]);
 
   // TIMER2: free-running 32-bit counter at 16 MHz -> 62.5 ns/tick.
   NRF_TIMER2->TASKS_STOP  = 1;
@@ -190,6 +216,143 @@ void disarmTiming() {
   NRF_PPI->TASKS_CHG[PPI_GRP_S1].DIS = 1;
   NRF_PPI->TASKS_CHG[PPI_GRP_S2].DIS = 1;
   releaseHfxo();
+}
+
+// ----------------------------------------------------- calibration engine
+// Measures a channel's time-to-threshold under a known stimulus: the charge
+// pin steps HIGH through its 10 k 1% resistor and the node's RC rise is
+// timed from launch to the GPIO threshold crossing — both ends in hardware.
+// The launch is PPI-synchronized (TIMER2 compare -> GPIOTE SET task) so
+// SoftDevice preemption cannot skew a sample; a preempted setup surfaces as
+// a timeout and is excluded from the stats. The app runs this with the port
+// bare (baseline) and again with the sensor attached; the difference
+// isolates the cable+sensor load with the pin threshold and fixture
+// capacitance cancelled.
+
+const uint8_t  CAL_SAMPLES       = 64;
+const uint32_t CAL_DISCHARGE_US  = 1000;            // ~5 tau for a 200 nF piezo via 1k
+const uint32_t CAL_TIMEOUT_TICKS = 16UL * 20000UL;  // 20 ms per sample
+const uint32_t CAL_LAUNCH_MARGIN = 1600;            // launch 100 us after scheduling
+
+static uint32_t isqrt64(uint64_t v) {
+  uint64_t r = 0, bit = 1ULL << 62;
+  while (bit > v) bit >>= 2;
+  while (bit) {
+    if (v >= r + bit) { v -= r + bit; r = (r >> 1) + bit; }
+    else r >>= 1;
+    bit >>= 2;
+  }
+  return (uint32_t)r;
+}
+
+void runCalibration(uint8_t channel) {
+  uint32_t sensPin = g_ADigitalPinMap[(channel == 1) ? SENSOR1_PIN : SENSOR2_PIN];
+  uint32_t chgPin  = g_ADigitalPinMap[(channel == 1) ? CHARGE1_PIN : CHARGE2_PIN];
+  uint8_t  evCh    = (channel == 1) ? GPIOTE_S1 : GPIOTE_S2;
+  uint8_t  taskCh  = (channel == 1) ? GPIOTE_C1 : GPIOTE_C2;
+  uint8_t  grp     = (channel == 1) ? PPI_GRP_S1 : PPI_GRP_S2;
+  uint8_t  ccIdx   = (channel == 1) ? 0 : 1;
+
+  requestHfxo();   // absolute nanoseconds matter here: run off the crystal
+
+  // Charge pin under GPIOTE task control, output LOW.
+  NRF_GPIOTE->CONFIG[taskCh] =
+      (GPIOTE_CONFIG_MODE_Task       << GPIOTE_CONFIG_MODE_Pos)     |
+      (chgPin                        << GPIOTE_CONFIG_PSEL_Pos)     |
+      (GPIOTE_CONFIG_POLARITY_Toggle << GPIOTE_CONFIG_POLARITY_Pos) |
+      (GPIOTE_CONFIG_OUTINIT_Low     << GPIOTE_CONFIG_OUTINIT_Pos);
+
+  // Hardware launch: TIMER2 compare-3 event -> charge-pin SET task.
+  NRF_PPI->CH[PPI_LAUNCH].EEP = (uint32_t)&NRF_TIMER2->EVENTS_COMPARE[3];
+  NRF_PPI->CH[PPI_LAUNCH].TEP = (uint32_t)&NRF_GPIOTE->TASKS_SET[taskCh];
+  NRF_PPI->FORK[PPI_LAUNCH].TEP = 0;
+
+  static uint32_t ticksBuf[CAL_SAMPLES];
+  uint8_t valid = 0;
+  uint8_t timeouts = 0;
+
+  for (uint8_t i = 0; i <= CAL_SAMPLES; i++) {   // one extra: first sweep discarded
+    // Discharge the node completely (sensor pin drives it low directly;
+    // the charge pin pulls low through the 10k as well).
+    NRF_GPIOTE->TASKS_CLR[taskCh] = 1;
+    nrf_gpio_cfg(sensPin, NRF_GPIO_PIN_DIR_OUTPUT, NRF_GPIO_PIN_INPUT_CONNECT,
+                 NRF_GPIO_PIN_NOPULL, NRF_GPIO_PIN_S0S1, NRF_GPIO_PIN_NOSENSE);
+    nrf_gpio_pin_clear(sensPin);
+    delayMicroseconds(CAL_DISCHARGE_US);
+
+    // Release the node with NO pull — the internal pulldown would divide
+    // the ramp against the 10k and sag the asymptote near the threshold.
+    nrf_gpio_cfg(sensPin, NRF_GPIO_PIN_DIR_INPUT, NRF_GPIO_PIN_INPUT_CONNECT,
+                 NRF_GPIO_PIN_NOPULL, NRF_GPIO_PIN_S0S1, NRF_GPIO_PIN_NOSENSE);
+
+    NRF_GPIOTE->EVENTS_IN[evCh] = 0;
+    (void)NRF_GPIOTE->EVENTS_IN[evCh];
+    NRF_PPI->TASKS_CHG[grp].EN = 1;              // arm the threshold capture
+
+    // Schedule the launch a fixed margin ahead, then let hardware take over.
+    NRF_TIMER2->EVENTS_COMPARE[3] = 0;
+    NRF_TIMER2->TASKS_CAPTURE[2] = 1;
+    uint32_t t0 = NRF_TIMER2->CC[2] + CAL_LAUNCH_MARGIN;
+    NRF_TIMER2->CC[3] = t0;
+    NRF_PPI->CHENSET = (1UL << PPI_LAUNCH);
+
+    bool got = false;
+    while (true) {
+      if (NRF_GPIOTE->EVENTS_IN[evCh]) { got = true; break; }
+      NRF_TIMER2->TASKS_CAPTURE[2] = 1;
+      if ((uint32_t)(NRF_TIMER2->CC[2] - t0) > CAL_TIMEOUT_TICKS) break;
+    }
+
+    NRF_PPI->CHENCLR = (1UL << PPI_LAUNCH);
+    NRF_PPI->TASKS_CHG[grp].DIS = 1;
+    NRF_GPIOTE->EVENTS_IN[evCh] = 0;
+
+    if (i == 0) continue;                        // residual-charge settling sweep
+    if (got) ticksBuf[valid++] = NRF_TIMER2->CC[ccIdx] - t0;
+    else     timeouts++;
+  }
+
+  // Restore live-fire pin configuration.
+  NRF_GPIOTE->TASKS_CLR[taskCh] = 1;
+  NRF_GPIOTE->CONFIG[taskCh] = 0;                // release charge pin from GPIOTE
+  nrf_gpio_cfg_default(chgPin);                  // back to true hi-Z
+  nrf_gpio_cfg_input(sensPin, NRF_GPIO_PIN_PULLDOWN);
+  if (!armed) releaseHfxo();
+
+  // Stats: insertion sort for the median, integer mean/stddev, all in ticks
+  // then converted to ns (x62.5 = x125/2).
+  for (uint8_t i = 1; i < valid; i++) {
+    uint32_t key = ticksBuf[i];
+    int8_t j = i - 1;
+    while (j >= 0 && ticksBuf[j] > key) { ticksBuf[j + 1] = ticksBuf[j]; j--; }
+    ticksBuf[j + 1] = key;
+  }
+
+  CalResult r = {};
+  r.channel = channel;
+  r.samples = valid;
+  if (valid == 0) {
+    r.status = 2;
+  } else {
+    r.status = (timeouts > 0) ? 1 : 0;
+    uint64_t sum = 0, sumsq = 0;
+    for (uint8_t i = 0; i < valid; i++) {
+      sum += ticksBuf[i];
+      sumsq += (uint64_t)ticksBuf[i] * ticksBuf[i];
+    }
+    uint32_t meanT = (uint32_t)(sum / valid);
+    int64_t var = (int64_t)(sumsq / valid) - (int64_t)meanT * meanT;
+    if (var < 0) var = 0;
+    uint32_t medT = (valid & 1) ? ticksBuf[valid / 2]
+                                : (ticksBuf[valid / 2 - 1] + ticksBuf[valid / 2]) / 2;
+    r.medianNs = (uint32_t)(((uint64_t)medT * 125ULL) / 2ULL);
+    r.meanNs   = (uint32_t)(((uint64_t)meanT * 125ULL) / 2ULL);
+    r.stddevNs = (uint32_t)(((uint64_t)isqrt64((uint64_t)var) * 125ULL) / 2ULL);
+    r.minNs    = (uint32_t)(((uint64_t)ticksBuf[0] * 125ULL) / 2ULL);
+  }
+
+  chCal.write((uint8_t*)&r, sizeof(r));
+  chCal.notify((uint8_t*)&r, sizeof(r));
 }
 
 // -------------------------------------------------------------- helpers
@@ -270,6 +433,12 @@ void onControlWrite(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, ui
     case CMD_FETCH:
       fetchRequested = true;   // handled in loop() — keeps this callback quick
       break;
+    case CMD_CALIBRATE:
+      // Deferred to loop() like FETCH; refused while a shot could arrive.
+      if (state != ST_ARMED && state != ST_RUNNING && arg >= 1 && arg <= 2) {
+        calRequested = (uint8_t)arg;
+      }
+      break;
   }
 }
 
@@ -340,6 +509,11 @@ void setup() {
   chTime.setWriteCallback(onTimeWrite);
   chTime.begin();
 
+  chCal.setProperties(CHR_PROPS_READ | CHR_PROPS_NOTIFY);
+  chCal.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+  chCal.setFixedLen(sizeof(CalResult));
+  chCal.begin();
+
   notifyStatus();
 
   Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
@@ -399,6 +573,15 @@ void loop() {
     acked = true;
   }
   if (acked) notifyStatus();
+
+  if (calRequested) {
+    uint8_t ch = calRequested;
+    calRequested = 0;
+    uint8_t prev = state;
+    setState(ST_CALIBRATING);
+    runCalibration(ch);
+    setState(prev);   // resume idle or the verify-ok state the wizard shows
+  }
 
   if (fetchRequested) {
     fetchRequested = false;

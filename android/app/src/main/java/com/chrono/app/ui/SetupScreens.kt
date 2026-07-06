@@ -27,6 +27,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,9 +55,11 @@ fun VerifyPane(
     sensor: Int,
     deviceState: Int,
     modifier: Modifier = Modifier,
+    verifiedOverride: Boolean = false,
 ) {
     val listening = deviceState == if (sensor == 1) Proto.ST_VERIFY1 else Proto.ST_VERIFY2
-    val verified = deviceState == if (sensor == 1) Proto.ST_VERIFY1_OK else Proto.ST_VERIFY2_OK
+    val verified = verifiedOverride ||
+        deviceState == if (sensor == 1) Proto.ST_VERIFY1_OK else Proto.ST_VERIFY2_OK
     val role = if (sensor == 1) "START" else "STOP"
 
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
@@ -113,6 +116,83 @@ fun VerifyPane(
     }
 }
 
+/** Step 1 of the wizard: measure both ports with nothing plugged in. */
+@Composable
+fun BaselineScreen(vm: ChronoViewModel, connState: ConnState) {
+    val b1 = vm.calData["b1"]
+    val b2 = vm.calData["b2"]
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(28.dp).verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(Modifier.height(20.dp))
+        Text("SETUP  1/4", style = MaterialTheme.typography.labelSmall, color = TextDim)
+        Spacer(Modifier.height(24.dp))
+
+        if (connState == ConnState.RECONNECTING) {
+            ReconnectingBanner()
+            Spacer(Modifier.height(16.dp))
+        }
+
+        Text("Port baseline", style = MaterialTheme.typography.headlineMedium)
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "Leave both sensor ports EMPTY — nothing plugged in. The device " +
+                "measures each bare port so that the sensor and cable can be " +
+                "measured separately in the next steps.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextDim,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(28.dp))
+
+        if (vm.calRunning) {
+            CircularProgressIndicator(color = Amber, modifier = Modifier.size(28.dp))
+            Spacer(Modifier.height(10.dp))
+            Text("Measuring ports…", color = TextDim)
+        } else {
+            Button(onClick = { vm.startBaselineCal() }, modifier = Modifier.fillMaxWidth()) {
+                Text(if (b1 == null && b2 == null) "Run baseline" else "Run baseline again")
+            }
+        }
+        Spacer(Modifier.height(20.dp))
+
+        CalRow("Port 1", vm.calData["b1"])
+        Spacer(Modifier.height(8.dp))
+        CalRow("Port 2", vm.calData["b2"])
+
+        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(24.dp))
+        Button(
+            onClick = { vm.continueToSensor1() },
+            enabled = b1 != null && b2 != null && !vm.calRunning,
+            modifier = Modifier.fillMaxWidth().height(54.dp),
+        ) { Text("Continue to sensor 1") }
+    }
+}
+
+@Composable
+private fun CalRow(label: String, entry: com.chrono.app.CalEntry?) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        if (entry == null) {
+            Text("—", color = TextDim)
+        } else {
+            Text(
+                "%.2f µs  ·  σ %d ns  ·  n=%d".format(
+                    entry.medianNs / 1000.0, entry.stddevNs, entry.samples
+                ),
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (entry.status == 0) TextDim else Amber,
+            )
+        }
+    }
+}
+
 @Composable
 fun SensorSetupScreen(
     vm: ChronoViewModel,
@@ -121,7 +201,23 @@ fun SensorSetupScreen(
     connState: ConnState,
     onContinue: () -> Unit,
 ) {
-    val verified = deviceState == if (sensor == 1) Proto.ST_VERIFY1_OK else Proto.ST_VERIFY2_OK
+    // Latch: the device wanders through CALIBRATING after the trigger test,
+    // so remember locally that this sensor already passed.
+    var wasVerified by remember(sensor) { mutableStateOf(false) }
+    var calStarted by remember(sensor) { mutableStateOf(false) }
+    if (deviceState == (if (sensor == 1) Proto.ST_VERIFY1_OK else Proto.ST_VERIFY2_OK)) {
+        wasVerified = true
+    }
+
+    // Once verified, automatically measure the channel with the sensor attached.
+    LaunchedEffect(wasVerified) {
+        if (wasVerified && !calStarted) {
+            calStarted = true
+            vm.startLoadedCal(sensor)
+        }
+    }
+
+    val loadNs = vm.channelLoadNs(sensor)
 
     Column(
         modifier = Modifier.fillMaxSize().padding(28.dp).verticalScroll(rememberScrollState()),
@@ -129,7 +225,7 @@ fun SensorSetupScreen(
     ) {
         Spacer(Modifier.height(20.dp))
         Text(
-            "SETUP  ${sensor}/3",
+            "SETUP  ${sensor + 1}/4",
             style = MaterialTheme.typography.labelSmall,
             color = TextDim,
         )
@@ -140,13 +236,45 @@ fun SensorSetupScreen(
             Spacer(Modifier.height(16.dp))
         }
 
-        VerifyPane(sensor = sensor, deviceState = deviceState)
+        VerifyPane(sensor = sensor, deviceState = deviceState, verifiedOverride = wasVerified)
+
+        if (wasVerified) {
+            Spacer(Modifier.height(16.dp))
+            if (vm.calRunning) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        color = Amber, modifier = Modifier.size(16.dp), strokeWidth = 2.dp,
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    Text("Measuring channel…", color = TextDim,
+                        style = MaterialTheme.typography.bodyMedium)
+                }
+            } else if (loadNs != null) {
+                Text(
+                    "Channel load: +%.2f µs above baseline  (≈ %d pF)".format(
+                        loadNs / 1000.0, (loadNs / 12.0).toInt()
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextDim,
+                    textAlign = TextAlign.Center,
+                )
+                if (loadNs < 250) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "That looks like an empty port — is the sensor actually plugged in?",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Amber,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+        }
 
         Spacer(Modifier.weight(1f))
         Spacer(Modifier.height(24.dp))
         Button(
             onClick = onContinue,
-            enabled = verified,
+            enabled = wasVerified && !vm.calRunning,
             modifier = Modifier.fillMaxWidth().height(54.dp),
         ) {
             Text(if (sensor == 1) "Continue to sensor 2" else "Continue")
@@ -168,7 +296,7 @@ fun DistanceScreen(vm: ChronoViewModel) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(20.dp))
-        Text("SETUP  3/3", style = MaterialTheme.typography.labelSmall, color = TextDim)
+        Text("SETUP  4/4", style = MaterialTheme.typography.labelSmall, color = TextDim)
         Spacer(Modifier.height(48.dp))
         Text("Sensor spacing", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(10.dp))

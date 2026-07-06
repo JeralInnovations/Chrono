@@ -34,6 +34,7 @@ object Proto {
     val CONTROL: UUID = UUID.fromString("a5c40003-9d95-4e4c-8c5a-c1d6f2a80de1")
     val RESULT: UUID = UUID.fromString("a5c40004-9d95-4e4c-8c5a-c1d6f2a80de1")
     val TIME: UUID = UUID.fromString("a5c40005-9d95-4e4c-8c5a-c1d6f2a80de1")
+    val CAL: UUID = UUID.fromString("a5c40006-9d95-4e4c-8c5a-c1d6f2a80de1")
     val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
     const val CMD_VERIFY1: Byte = 1
@@ -43,6 +44,7 @@ object Proto {
     const val CMD_ACK: Byte = 5
     const val CMD_CANCEL: Byte = 6
     const val CMD_FETCH: Byte = 7
+    const val CMD_CALIBRATE: Byte = 8
 
     const val ST_IDLE = 0
     const val ST_VERIFY1 = 1
@@ -51,11 +53,23 @@ object Proto {
     const val ST_VERIFY2_OK = 4
     const val ST_ARMED = 5
     const val ST_RUNNING = 6
+    const val ST_CALIBRATING = 7
 }
 
 data class DeviceStatus(val state: Int, val pendingCount: Int, val timeValid: Boolean)
 
 data class RawResult(val id: Int, val splitNs: Long, val epochSec: Long)
+
+/** One calibration sweep summary from the device (all times in ns). */
+data class CalReading(
+    val channel: Int,
+    val status: Int,      // 0 ok, 1 some timeouts, 2 failed
+    val samples: Int,
+    val medianNs: Long,
+    val meanNs: Long,
+    val stddevNs: Long,
+    val minNs: Long,
+)
 
 data class FoundDevice(val device: BluetoothDevice, val name: String, val rssi: Int)
 
@@ -72,6 +86,7 @@ class ChronoBle(private val context: Context) {
     val connState = MutableStateFlow(ConnState.DISCONNECTED)
     val status = MutableStateFlow<DeviceStatus?>(null)
     val results = MutableSharedFlow<RawResult>(extraBufferCapacity = 32)
+    val cal = MutableSharedFlow<CalReading>(extraBufferCapacity = 8)
     val found = MutableStateFlow<List<FoundDevice>>(emptyList())
 
     val adapter: BluetoothAdapter?
@@ -84,6 +99,7 @@ class ChronoBle(private val context: Context) {
     private var chStatus: BluetoothGattCharacteristic? = null
     private var chResult: BluetoothGattCharacteristic? = null
     private var chTime: BluetoothGattCharacteristic? = null
+    private var chCal: BluetoothGattCharacteristic? = null
 
     // ------------------------------------------------------------ scanning
 
@@ -157,6 +173,7 @@ class ChronoBle(private val context: Context) {
     private var simPending = 0
     private var simTimeValid = false
     private var simNextId = 1
+    private val simCalCount = intArrayOf(0, 0)
 
     fun connectSimulated() {
         stopScan()
@@ -164,6 +181,8 @@ class ChronoBle(private val context: Context) {
         simState = Proto.ST_IDLE
         simPending = 0
         simTimeValid = false
+        simCalCount[0] = 0
+        simCalCount[1] = 0
         pushSimStatus()
         connState.value = ConnState.CONNECTED
     }
@@ -197,6 +216,32 @@ class ChronoBle(private val context: Context) {
                 pushSimStatus()
             }
             Proto.CMD_FETCH -> Unit   // nothing buffered in simulation
+            Proto.CMD_CALIBRATE -> simCalibrate(arg)
+        }
+    }
+
+    /** First sweep per channel plays the bare port; later sweeps play loaded. */
+    private fun simCalibrate(channel: Int) {
+        if (channel !in 1..2) return
+        simScope.launch {
+            val prev = simState
+            simState = Proto.ST_CALIBRATING
+            pushSimStatus()
+            delay(900)
+            val idx = channel - 1
+            val bare = simCalCount[idx] == 0
+            simCalCount[idx]++
+            val base = if (bare) 420L + channel * 25L else 4600L + channel * 240L
+            val median = base + (-30L..30L).random()
+            cal.tryEmit(
+                CalReading(
+                    channel = channel, status = 0, samples = 64,
+                    medianNs = median, meanNs = median + 4,
+                    stddevNs = 35L + (0L..20L).random(), minNs = median - 60,
+                )
+            )
+            simState = prev
+            pushSimStatus()
         }
     }
 
@@ -361,12 +406,14 @@ class ChronoBle(private val context: Context) {
             chControl = svc.getCharacteristic(Proto.CONTROL)
             chResult = svc.getCharacteristic(Proto.RESULT)
             chTime = svc.getCharacteristic(Proto.TIME)
+            chCal = svc.getCharacteristic(Proto.CAL)   // optional (newer firmware)
             if (chStatus == null || chControl == null || chResult == null || chTime == null) {
                 g.disconnect()
                 return
             }
             enableNotifications(chStatus!!)
             enableNotifications(chResult!!)
+            chCal?.let { enableNotifications(it) }
             readStatus()
             syncTime()                        // sync clock on every (re)connect
             sendCommand(Proto.CMD_FETCH)      // collect results recorded while disconnected
@@ -407,6 +454,17 @@ class ChronoBle(private val context: Context) {
                 val splitNs = b.int.toLong() and 0xFFFFFFFFL
                 val epochSec = b.int.toLong() and 0xFFFFFFFFL
                 results.tryEmit(RawResult(id, splitNs, epochSec))
+            }
+            Proto.CAL -> if (v.size >= 20) {
+                val b = ByteBuffer.wrap(v).order(ByteOrder.LITTLE_ENDIAN)
+                val channel = b.get().toInt() and 0xFF
+                val calStatus = b.get().toInt() and 0xFF
+                val samples = b.short.toInt() and 0xFFFF
+                val medianNs = b.int.toLong() and 0xFFFFFFFFL
+                val meanNs = b.int.toLong() and 0xFFFFFFFFL
+                val stddevNs = b.int.toLong() and 0xFFFFFFFFL
+                val minNs = b.int.toLong() and 0xFFFFFFFFL
+                cal.tryEmit(CalReading(channel, calStatus, samples, medianNs, meanNs, stddevNs, minNs))
             }
         }
     }
