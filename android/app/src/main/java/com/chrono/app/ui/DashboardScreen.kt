@@ -5,6 +5,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -26,13 +27,11 @@ import androidx.compose.material.icons.filled.BluetoothConnected
 import androidx.compose.material.icons.filled.BluetoothDisabled
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -48,7 +47,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -61,6 +64,7 @@ import com.chrono.app.data.TestResult
 import com.chrono.app.ui.theme.Amber
 import com.chrono.app.ui.theme.Bad
 import com.chrono.app.ui.theme.Good
+import com.chrono.app.ui.theme.PanelHigh
 import com.chrono.app.ui.theme.Teal
 import com.chrono.app.ui.theme.TextDim
 import java.time.LocalDateTime
@@ -136,7 +140,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
             }
         }
 
-        item { SensorsCard(vm, enabled = connState == ConnState.CONNECTED && !armed && !running) }
+        item { RigCard(vm, enabled = connState == ConnState.CONNECTED && !armed && !running) }
 
         item {
             ChannelsCard(
@@ -152,6 +156,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                 armed = armed,
                 running = running,
                 connected = connState == ConnState.CONNECTED || connState == ConnState.RECONNECTING,
+                sensorsReady = vm.sensor1Ready && vm.sensor2Ready,
                 onArm = { vm.arm() },
                 onDisarm = { vm.disarm() },
             )
@@ -177,9 +182,9 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
         val verified = (deviceStatus?.state ?: -1) ==
             if (sensor == 1) Proto.ST_VERIFY1_OK else Proto.ST_VERIFY2_OK
         AlertDialog(
-            onDismissRequest = { vm.finishRetest() },
+            onDismissRequest = { vm.finishRetest(verified) },
             confirmButton = {
-                TextButton(onClick = { vm.finishRetest() }) {
+                TextButton(onClick = { vm.finishRetest(verified) }) {
                     Text(if (verified) "Done" else "Cancel")
                 }
             },
@@ -260,28 +265,129 @@ private fun TopBar(vm: ChronoViewModel, connState: ConnState, deviceStatus: Devi
     }
 }
 
+/**
+ * The rig, drawn the way it stands on the bench: sensor 1 up front, the
+ * measured gap, sensor 2 behind it. Tap a sensor to retest/replace it; tap
+ * the distance to change it. Screens consumed by a shot show torn + amber.
+ */
 @Composable
-private fun SensorsCard(vm: ChronoViewModel, enabled: Boolean) {
+private fun RigCard(vm: ChronoViewModel, enabled: Boolean) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(Modifier.fillMaxWidth().padding(18.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Sensors", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                OutlinedButton(onClick = { vm.startRetest(1) }, enabled = enabled) { Text("Retest 1") }
-                Spacer(Modifier.size(8.dp))
-                OutlinedButton(onClick = { vm.startRetest(2) }, enabled = enabled) { Text("Retest 2") }
+            Text(
+                "SHOT DIRECTION  ▸",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextDim,
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+            )
+            Spacer(Modifier.height(14.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SensorGraphic(1, vm.sensor1Ready, enabled) { vm.startRetest(1) }
+                Column(
+                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    SpanArrow()
+                    TextButton(onClick = { vm.changeDistance() }, enabled = enabled) {
+                        Text(
+                            "${trimZeros(vm.distanceInUnit())} ${vm.distanceUnit.label}",
+                            color = Teal,
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                    }
+                    Text(
+                        "tap to change",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextDim,
+                    )
+                }
+                SensorGraphic(2, vm.sensor2Ready, enabled) { vm.startRetest(2) }
             }
-            HorizontalDivider(Modifier.padding(vertical = 14.dp), color = MaterialTheme.colorScheme.outline)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Straighten, null, tint = Teal, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.size(10.dp))
+            if (!vm.sensor1Ready || !vm.sensor2Ready) {
+                Spacer(Modifier.height(12.dp))
                 Text(
-                    "Spacing:  ${trimZeros(vm.distanceInUnit())} ${vm.distanceUnit.label}",
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodyLarge,
+                    "Each shot consumes the screens. Fit new wire, then tap the torn sensor to retest it.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Amber,
                 )
-                OutlinedButton(onClick = { vm.changeDistance() }, enabled = enabled) { Text("Change") }
             }
         }
+    }
+}
+
+@Composable
+private fun SensorGraphic(number: Int, ready: Boolean, enabled: Boolean, onTap: () -> Unit) {
+    val frame = if (ready) Good else Amber
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.clickable(enabled = enabled, onClick = onTap),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Canvas(Modifier.size(64.dp, 80.dp)) {
+                val w = size.width
+                val h = size.height
+                drawRoundRect(color = PanelHigh, cornerRadius = CornerRadius(10f, 10f))
+                // screen mesh
+                for (i in 1..3) {
+                    val x = w * i / 4f
+                    drawLine(Color.White.copy(alpha = 0.08f), Offset(x, 6f), Offset(x, h - 6f), 2f)
+                    val y = h * i / 4f
+                    drawLine(Color.White.copy(alpha = 0.08f), Offset(6f, y), Offset(w - 6f, y), 2f)
+                }
+                drawRoundRect(
+                    color = frame,
+                    cornerRadius = CornerRadius(10f, 10f),
+                    style = Stroke(width = 5f),
+                )
+                if (!ready) {
+                    // jagged tear through a consumed screen
+                    val tear = Path().apply {
+                        moveTo(w * 0.55f, 0f)
+                        lineTo(w * 0.35f, h * 0.30f)
+                        lineTo(w * 0.62f, h * 0.46f)
+                        lineTo(w * 0.40f, h * 0.72f)
+                        lineTo(w * 0.55f, h)
+                    }
+                    drawPath(tear, Amber, style = Stroke(width = 4f))
+                }
+            }
+            Text(
+                "$number",
+                fontFamily = FontFamily.Monospace,
+                fontSize = 22.sp,
+                color = frame,
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            if (number == 1) "START" else "STOP",
+            style = MaterialTheme.typography.labelSmall,
+            color = TextDim,
+        )
+        Text(
+            if (ready) "Ready" else "Retest",
+            style = MaterialTheme.typography.bodyMedium,
+            color = frame,
+        )
+    }
+}
+
+/** A |◀——▶| measurement arrow spanning the gap between the two screens. */
+@Composable
+private fun SpanArrow() {
+    Canvas(Modifier.fillMaxWidth().height(18.dp)) {
+        val w = size.width
+        val cy = size.height / 2f
+        drawLine(TextDim, Offset(2f, 3f), Offset(2f, size.height - 3f), 3f)
+        drawLine(TextDim, Offset(w - 2f, 3f), Offset(w - 2f, size.height - 3f), 3f)
+        drawLine(TextDim, Offset(2f, cy), Offset(w - 2f, cy), 3f)
+        drawLine(TextDim, Offset(2f, cy), Offset(12f, cy - 5f), 3f)
+        drawLine(TextDim, Offset(2f, cy), Offset(12f, cy + 5f), 3f)
+        drawLine(TextDim, Offset(w - 2f, cy), Offset(w - 12f, cy - 5f), 3f)
+        drawLine(TextDim, Offset(w - 2f, cy), Offset(w - 12f, cy + 5f), 3f)
     }
 }
 
@@ -375,6 +481,7 @@ private fun ArmButton(
     armed: Boolean,
     running: Boolean,
     connected: Boolean,
+    sensorsReady: Boolean,
     onArm: () -> Unit,
     onDisarm: () -> Unit,
 ) {
@@ -434,13 +541,24 @@ private fun ArmButton(
             }
         }
         else -> {
-            Button(
-                onClick = onArm,
-                enabled = connected,
-                modifier = Modifier.fillMaxWidth().height(64.dp),
-                shape = RoundedCornerShape(20.dp),
-            ) {
-                Text("ARM  —  TEST STANDBY", style = MaterialTheme.typography.labelLarge)
+            Column {
+                Button(
+                    onClick = onArm,
+                    enabled = connected && sensorsReady,
+                    modifier = Modifier.fillMaxWidth().height(64.dp),
+                    shape = RoundedCornerShape(20.dp),
+                ) {
+                    Text("ARM  —  TEST STANDBY", style = MaterialTheme.typography.labelLarge)
+                }
+                if (connected && !sensorsReady) {
+                    Text(
+                        "Replace and retest both sensors before arming.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextDim,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    )
+                }
             }
         }
     }

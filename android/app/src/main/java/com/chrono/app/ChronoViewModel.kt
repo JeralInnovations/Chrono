@@ -68,6 +68,18 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     var retestSensor by mutableStateOf<Int?>(null)
         private set
 
+    // Break-screens are consumed by every shot: these flip false on each new
+    // result, and both must be re-verified before the next arm.
+    var sensor1Ready by mutableStateOf(prefs.getBoolean("s1Ready", false))
+        private set
+    var sensor2Ready by mutableStateOf(prefs.getBoolean("s2Ready", false))
+        private set
+
+    private fun setSensorReady(sensor: Int, ready: Boolean) {
+        if (sensor == 1) sensor1Ready = ready else sensor2Ready = ready
+        prefs.edit().putBoolean(if (sensor == 1) "s1Ready" else "s2Ready", ready).apply()
+    }
+
     private val setupDone: Boolean get() = prefs.getBoolean("setupDone", false)
 
     val isSimulation: Boolean get() = ble.isSimulation
@@ -93,6 +105,15 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch { ble.cal.collect { onCalReading(it) } }
         viewModelScope.launch { ble.results.collect { onRawResult(it) } }
+        // Latch sensor readiness whenever a verify test passes (wizard or retest).
+        viewModelScope.launch {
+            ble.status.collect { st ->
+                when (st?.state) {
+                    Proto.ST_VERIFY1_OK -> if (!sensor1Ready) setSensorReady(1, true)
+                    Proto.ST_VERIFY2_OK -> if (!sensor2Ready) setSensorReady(2, true)
+                }
+            }
+        }
         viewModelScope.launch {
             ble.connState.collect { cs ->
                 when (cs) {
@@ -129,6 +150,10 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
                 )
             )
             persist()
+            // A real shot destroys both break-screens: force re-verify (and the
+            // retest flow re-measures the fresh screen's load automatically).
+            setSensorReady(1, false)
+            setSensorReady(2, false)
         }
         // Tell the device it can forget this result now that it's stored on the phone.
         ble.sendCommand(Proto.CMD_ACK, r.id)
@@ -267,9 +292,12 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         ble.sendCommand(if (sensor == 1) Proto.CMD_VERIFY1 else Proto.CMD_VERIFY2)
     }
 
-    fun finishRetest() {
+    fun finishRetest(verified: Boolean) {
+        val sensor = retestSensor
         retestSensor = null
         ble.sendCommand(Proto.CMD_CANCEL)
+        // A fresh screen is a new electrical load — re-measure it right away.
+        if (verified && sensor != null) startLoadedCal(sensor)
     }
 
     fun arm() = ble.sendCommand(Proto.CMD_ARM)

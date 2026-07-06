@@ -150,6 +150,12 @@ The dashboard's **Channel calibration** card shows each port's measured load
 (≈ pF) and flags whether the two channels are matched; **Recheck** reruns the
 loaded sweep any time (sensors attached, undisturbed). Every sweep is appended
 to `cal_history.jsonl` in the app's private storage for later analysis.
+
+**Break-screens are consumable.** Every recorded shot automatically marks both
+sensors as consumed on the dashboard's rig diagram (torn amber screens) and
+disables ARM. Fit fresh wire, tap the torn sensor in the diagram to retest it —
+the app re-verifies the trigger and automatically re-measures the new screen's
+electrical load before the next shot can be armed.
 5. **Dashboard** — from here you can:
    - **Retest 1 / Retest 2** — re-run either sensor test any time
    - **Change** — edit the sensor spacing
