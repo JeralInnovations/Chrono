@@ -180,9 +180,17 @@ electrical load before the next shot can be armed.
    shows *Reconnecting…* and automatically pulls the results in as soon as you're
    back in range.
 7. **Time & date** — the app syncs the phone's clock to the device on every
-   connection (and via the clock chip at the top of the dashboard). If a shot
-   happened before the clock was ever synced, its date shows grayed out as
-   *"No date"* — tap the pencil to type one in (`yyyy-MM-dd HH:mm`).
+   connection (and via the clock chip at the top of the dashboard). The device
+   runs a **flywheel clock from boot**: every shot is stamped against it, so a
+   sync at *any* point during that boot — before or after the shot — applies
+   the correct wall-clock time retroactively or forward. Only shots from a
+   boot that never got a single sync show a grayed *"No date"* — tap the
+   pencil to type one in (`yyyy-MM-dd HH:mm`).
+8. **Test details** — the *Next test* card has blanks for **Label**, **Tool**,
+   **Target**, and **Distance to target**, applied to the next shot (tool and
+   target persist between sessions). The **Result** blank is filled in via the
+   pencil on the result card after you've seen the target. Everything exports
+   to CSV.
 
 Each result shows **ft/s**, **m/s**, and the raw **split in milliseconds**
 (microsecond resolution). Results are stored on the phone and survive app restarts.

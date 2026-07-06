@@ -105,7 +105,7 @@ BLECharacteristic chTime   (UUID_TIME);     // write: uint32 LE unix seconds
 BLECharacteristic chCal    (UUID_CAL);      // read/notify: CalResult struct below
 BLECharacteristic chInfo   (UUID_INFO);     // read: HwInfo struct below
 
-// One measurement. 11 bytes, little-endian — parsed byte-for-byte by the app.
+// One measurement on the wire. 11 bytes LE — parsed byte-for-byte by the app.
 struct __attribute__((packed)) Result {
   uint16_t id;
   uint32_t splitNs;   // time between sensor 1 and sensor 2, NANOSECONDS
@@ -113,10 +113,21 @@ struct __attribute__((packed)) Result {
   uint8_t  flags;     // bit0: epoch is valid
 };
 
+// Stored form: the timestamp is a boot-relative millis() reading — a
+// "flywheel clock" that runs from power-on. The unix epoch is computed at
+// SEND time, so a shot taken before the phone ever synced the clock still
+// gets a correct timestamp as long as a sync happens at some point during
+// this boot (it normally does, automatically, on every connect).
+struct Pending {
+  uint16_t id;
+  uint32_t splitNs;
+  uint32_t bootMs;
+};
+
 // Results wait here until the phone ACKs them, so nothing is lost if
 // the BLE link drops while a test is in progress.
 const uint8_t MAX_PENDING = 16;
-Result   pending[MAX_PENDING];
+Pending  pending[MAX_PENDING];
 uint8_t  pendingCount = 0;
 uint16_t nextId       = 1;
 
@@ -137,7 +148,7 @@ struct __attribute__((packed)) CalResult {
 // follows automatically — no app update needed.
 const uint8_t HW_REV   = 1;
 const uint8_t FW_MAJOR = 1;
-const uint8_t FW_MINOR = 2;
+const uint8_t FW_MINOR = 3;
 
 struct __attribute__((packed)) HwInfo {
   uint8_t  hwRev;
@@ -376,9 +387,13 @@ void runCalibration(uint8_t channel) {
 }
 
 // -------------------------------------------------------------- helpers
-uint32_t currentEpoch() {
+// Flywheel conversion: boot-relative -> unix. The signed difference lets a
+// sync applied AFTER a shot back-date it, and one applied before carry
+// forward. Valid within ~24 days of the sync point (millis() wrap).
+uint32_t epochForBootMs(uint32_t bootMs) {
   if (!timeValid) return 0;
-  return epochBase + (millis() - millisBase) / 1000UL;
+  int32_t deltaMs = (int32_t)(bootMs - millisBase);
+  return epochBase + deltaMs / 1000;
 }
 
 void notifyStatus() {
@@ -387,28 +402,32 @@ void notifyStatus() {
   chStatus.notify(buf, sizeof(buf));
 }
 
-void notifyResult(const Result& r) {
+void notifyPending(const Pending& p) {
+  Result r;
+  r.id      = p.id;
+  r.splitNs = p.splitNs;
+  r.epoch   = epochForBootMs(p.bootMs);   // flywheel: computed fresh each send
+  r.flags   = (r.epoch != 0) ? 0x01 : 0x00;
   chResult.write((uint8_t*)&r, sizeof(r));
   chResult.notify((uint8_t*)&r, sizeof(r));
 }
 
 void storeResult(uint32_t splitNs) {
   if (pendingCount >= MAX_PENDING) {           // buffer full: drop the oldest
-    memmove(&pending[0], &pending[1], sizeof(Result) * (MAX_PENDING - 1));
+    memmove(&pending[0], &pending[1], sizeof(pending[0]) * (MAX_PENDING - 1));
     pendingCount = MAX_PENDING - 1;
   }
-  Result& r = pending[pendingCount++];
-  r.id      = nextId++;
-  r.splitNs = splitNs;
-  r.epoch   = currentEpoch();
-  r.flags   = timeValid ? 0x01 : 0x00;
-  notifyResult(r);   // no-op if nobody is connected/subscribed; FETCH re-sends
+  Pending& p = pending[pendingCount++];
+  p.id      = nextId++;
+  p.splitNs = splitNs;
+  p.bootMs  = millis();                        // flywheel timestamp
+  notifyPending(p);  // no-op if nobody is connected/subscribed; FETCH re-sends
 }
 
 void ackResult(uint16_t id) {
   for (uint8_t i = 0; i < pendingCount; i++) {
     if (pending[i].id == id) {
-      memmove(&pending[i], &pending[i + 1], sizeof(Result) * (pendingCount - i - 1));
+      memmove(&pending[i], &pending[i + 1], sizeof(pending[0]) * (pendingCount - i - 1));
       pendingCount--;
       break;
     }
@@ -615,7 +634,7 @@ void loop() {
   if (fetchRequested) {
     fetchRequested = false;
     for (uint8_t i = 0; i < pendingCount; i++) {
-      notifyResult(pending[i]);
+      notifyPending(pending[i]);
       delay(15);   // give the BLE stack room between notifications
     }
   }

@@ -22,12 +22,16 @@ object Exporter {
 
         val csv = File(dir, "chrono_results_$stamp.csv")
         csv.writeText(buildString {
-            appendLine("label,date_iso,split_ns,split_ms,distance_m,velocity_mps,velocity_fps")
+            appendLine(
+                "label,tool,target,target_distance,result,date_iso," +
+                    "split_ns,split_ms,distance_m,velocity_mps,velocity_fps"
+            )
             for (r in results) {
                 val date = r.epochMillis?.let { Instant.ofEpochMilli(it).toString() } ?: ""
-                val label = "\"" + r.label.replace("\"", "\"\"") + "\""
                 appendLine(
-                    label + "," + date + "," + r.splitNs + "," +
+                    esc(r.label) + "," + esc(r.tool) + "," + esc(r.target) + "," +
+                        esc(r.targetDistance) + "," + esc(r.outcome) + "," + date + "," +
+                        r.splitNs + "," +
                         String.format(Locale.US, "%.6f", r.splitMillis) + "," +
                         String.format(Locale.US, "%.5f", r.distanceM) + "," +
                         String.format(Locale.US, "%.3f", r.metersPerSecond) + "," +
@@ -51,6 +55,8 @@ object Exporter {
         }
         context.startActivity(Intent.createChooser(send, "Export Chrono data"))
     }
+
+    private fun esc(s: String) = "\"" + s.replace("\"", "\"\"") + "\""
 
     private fun uriFor(context: Context, file: File): Uri =
         FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)

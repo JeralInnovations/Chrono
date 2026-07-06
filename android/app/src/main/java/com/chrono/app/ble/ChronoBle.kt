@@ -207,7 +207,7 @@ class ChronoBle(private val context: Context) {
         simTimeValid = false
         simCalCount[0] = 0
         simCalCount[1] = 0
-        hwInfo.value = HwInfo(1, 1, 2, 62_500, 30, 300)   // pretends to be rev 1
+        hwInfo.value = HwInfo(1, 1, 3, 62_500, 30, 300)   // pretends to be rev 1
         pushSimStatus()
         connState.value = ConnState.CONNECTED
     }

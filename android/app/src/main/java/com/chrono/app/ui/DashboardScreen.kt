@@ -20,7 +20,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.BluetoothConnected
@@ -225,8 +227,8 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
         EditResultDialog(
             result = r,
             onDismiss = { editing = null },
-            onSave = { label, epochMillis ->
-                vm.updateResult(r.uid, label = label, epochMillis = epochMillis)
+            onSave = { label, tool, target, targetDistance, outcome, epochMillis ->
+                vm.updateResult(r.uid, label, tool, target, targetDistance, outcome, epochMillis)
                 editing = null
             },
             onDelete = {
@@ -490,24 +492,57 @@ private fun ChannelsCard(vm: ChronoViewModel, enabled: Boolean) {
 
 @Composable
 private fun NextTestCard(vm: ChronoViewModel, armed: Boolean) {
+    val fieldText = MaterialTheme.typography.bodyMedium
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Column(Modifier.fillMaxWidth().padding(18.dp)) {
-            Text("Test label", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(4.dp))
+        Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp)) {
+            Text("Next test", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(2.dp))
             Text(
-                "Applied to the next result. You can also edit it afterwards.",
+                "Applied to the next result; everything is editable afterwards.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextDim,
             )
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
             OutlinedTextField(
                 value = vm.pendingLabel,
                 onValueChange = { vm.pendingLabel = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("e.g. .22 pellet, spring #3", color = TextDim) },
+                label = { Text("Label") },
+                placeholder = { Text(".22 pellet, spring #3", color = TextDim) },
+                textStyle = fieldText,
                 singleLine = true,
-                enabled = true,
             )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = vm.pendingTool,
+                onValueChange = { vm.pendingTool = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Tool") },
+                placeholder = { Text("launcher / gun / device", color = TextDim) },
+                textStyle = fieldText,
+                singleLine = true,
+            )
+            Spacer(Modifier.height(8.dp))
+            Row {
+                OutlinedTextField(
+                    value = vm.pendingTarget,
+                    onValueChange = { vm.pendingTarget = it },
+                    modifier = Modifier.weight(1f),
+                    label = { Text("Target") },
+                    textStyle = fieldText,
+                    singleLine = true,
+                )
+                Spacer(Modifier.size(8.dp))
+                OutlinedTextField(
+                    value = vm.pendingTargetDistance,
+                    onValueChange = { vm.pendingTargetDistance = it },
+                    modifier = Modifier.weight(1f),
+                    label = { Text("Dist. to target") },
+                    placeholder = { Text("25 yd", color = TextDim) },
+                    textStyle = fieldText,
+                    singleLine = true,
+                )
+            }
         }
     }
 }
@@ -650,6 +685,23 @@ private fun ResultCard(r: TestResult, latest: Boolean, ciPercent: Double, onEdit
                     )
                 }
             }
+            val meta = listOfNotNull(
+                r.tool.takeIf { it.isNotBlank() }?.let { "Tool: $it" },
+                r.target.takeIf { it.isNotBlank() }?.let { "Target: $it" },
+                r.targetDistance.takeIf { it.isNotBlank() }?.let { "@ $it" },
+            ).joinToString("  ·  ")
+            if (meta.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Text(meta, style = MaterialTheme.typography.bodyMedium, color = TextDim)
+            }
+            if (r.outcome.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "Result: ${r.outcome}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                )
+            }
             Spacer(Modifier.height(8.dp))
             val date = r.formattedDate()
             Text(
@@ -669,10 +721,17 @@ private val EDIT_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 private fun EditResultDialog(
     result: TestResult,
     onDismiss: () -> Unit,
-    onSave: (label: String, epochMillis: Long?) -> Unit,
+    onSave: (
+        label: String, tool: String, target: String,
+        targetDistance: String, outcome: String, epochMillis: Long?,
+    ) -> Unit,
     onDelete: () -> Unit,
 ) {
     var label by remember { mutableStateOf(result.label) }
+    var tool by remember { mutableStateOf(result.tool) }
+    var target by remember { mutableStateOf(result.target) }
+    var targetDistance by remember { mutableStateOf(result.targetDistance) }
+    var outcome by remember { mutableStateOf(result.outcome) }
     var dateText by remember {
         mutableStateOf(
             result.epochMillis?.let {
@@ -689,25 +748,66 @@ private fun EditResultDialog(
         }.getOrNull()
     }
     val dateError = dateText.isNotBlank() && parsedDate == null
+    val fieldText = MaterialTheme.typography.bodyMedium
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Edit test") },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
                     value = label,
                     onValueChange = { label = it },
                     label = { Text("Label") },
+                    textStyle = fieldText,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = tool,
+                    onValueChange = { tool = it },
+                    label = { Text("Tool") },
+                    textStyle = fieldText,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                Row {
+                    OutlinedTextField(
+                        value = target,
+                        onValueChange = { target = it },
+                        label = { Text("Target") },
+                        textStyle = fieldText,
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    OutlinedTextField(
+                        value = targetDistance,
+                        onValueChange = { targetDistance = it },
+                        label = { Text("Dist. to target") },
+                        textStyle = fieldText,
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = outcome,
+                    onValueChange = { outcome = it },
+                    label = { Text("Result") },
+                    placeholder = { Text("hit / group size / notes", color = TextDim) },
+                    textStyle = fieldText,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = dateText,
                     onValueChange = { dateText = it },
                     label = { Text("Date & time") },
                     placeholder = { Text("yyyy-MM-dd HH:mm", color = TextDim) },
+                    textStyle = fieldText,
                     singleLine = true,
                     isError = dateError,
                     supportingText = {
@@ -717,7 +817,7 @@ private fun EditResultDialog(
                     },
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(6.dp))
                 TextButton(onClick = onDelete) {
                     Icon(Icons.Filled.Delete, null, tint = Bad, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.size(6.dp))
@@ -727,7 +827,12 @@ private fun EditResultDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onSave(label.trim(), parsedDate) },
+                onClick = {
+                    onSave(
+                        label.trim(), tool.trim(), target.trim(),
+                        targetDistance.trim(), outcome.trim(), parsedDate,
+                    )
+                },
                 enabled = !dateError,
             ) { Text("Save") }
         },

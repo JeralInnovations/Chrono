@@ -51,8 +51,12 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
 
     val results = mutableStateListOf<TestResult>()
 
-    /** Label applied to the next test; can also be edited on a result afterwards. */
+    /** Details applied to the next test; all editable on the result afterwards.
+     *  Tool/target fields persist across sessions (they rarely change mid-range-day). */
     var pendingLabel by mutableStateOf("")
+    var pendingTool by mutableStateOf(prefs.getString("pendTool", "") ?: "")
+    var pendingTarget by mutableStateOf(prefs.getString("pendTarget", "") ?: "")
+    var pendingTargetDistance by mutableStateOf(prefs.getString("pendTargetDist", "") ?: "")
 
     // The distance is kept exactly as the user typed it, in their chosen unit.
     // Converting to meters and back would turn "12 in" into 11.999… on screen.
@@ -150,9 +154,17 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
                     distanceM = distanceM,
                     label = pendingLabel.trim(),
                     epochMillis = if (r.epochSec > 0) r.epochSec * 1000L else null,
+                    tool = pendingTool.trim(),
+                    target = pendingTarget.trim(),
+                    targetDistance = pendingTargetDistance.trim(),
                 )
             )
             persist()
+            prefs.edit()
+                .putString("pendTool", pendingTool)
+                .putString("pendTarget", pendingTarget)
+                .putString("pendTargetDist", pendingTargetDistance)
+                .apply()
             // A real shot destroys both break-screens: force re-verify (and the
             // retest flow re-measures the fresh screen's load automatically).
             setSensorReady(1, false)
@@ -162,12 +174,24 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         ble.sendCommand(Proto.CMD_ACK, r.id)
     }
 
-    fun updateResult(uid: String, label: String? = null, epochMillis: Long? = null) {
+    fun updateResult(
+        uid: String,
+        label: String,
+        tool: String,
+        target: String,
+        targetDistance: String,
+        outcome: String,
+        epochMillis: Long?,
+    ) {
         val idx = results.indexOfFirst { it.uid == uid }
         if (idx < 0) return
         val r = results[idx]
         results[idx] = r.copy(
-            label = label ?: r.label,
+            label = label,
+            tool = tool,
+            target = target,
+            targetDistance = targetDistance,
+            outcome = outcome,
             epochMillis = epochMillis ?: r.epochMillis,
         )
         persist()

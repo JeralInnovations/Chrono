@@ -18,6 +18,11 @@ data class TestResult(
     var label: String,
     /** null = device had no synced clock at the time of the shot */
     var epochMillis: Long?,
+    var tool: String = "",
+    var targetDistance: String = "",
+    var target: String = "",
+    /** the "Result" blank — outcome notes, filled in after the shot */
+    var outcome: String = "",
 ) {
     val splitSeconds: Double get() = splitNs / 1_000_000_000.0
     val splitMillis: Double get() = splitNs / 1_000_000.0
@@ -56,6 +61,10 @@ class ResultStore(context: Context) {
                     distanceM = o.getDouble("distanceM"),
                     label = o.optString("label", ""),
                     epochMillis = o.optLong("epochMillis", -1L).takeIf { it > 0 },
+                    tool = o.optString("tool", ""),
+                    targetDistance = o.optString("targetDistance", ""),
+                    target = o.optString("target", ""),
+                    outcome = o.optString("outcome", ""),
                 )
             }
         }.getOrDefault(emptyList())
@@ -72,6 +81,10 @@ class ResultStore(context: Context) {
                     .put("distanceM", r.distanceM)
                     .put("label", r.label)
                     .put("epochMillis", r.epochMillis ?: -1L)
+                    .put("tool", r.tool)
+                    .put("targetDistance", r.targetDistance)
+                    .put("target", r.target)
+                    .put("outcome", r.outcome)
             )
         }
         file.writeText(arr.toString())
