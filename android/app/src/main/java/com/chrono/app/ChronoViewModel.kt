@@ -95,6 +95,14 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var photoCount by mutableStateOf(0)
         private set
+    var setupPhotosNeeded by mutableStateOf(prefs.getBoolean("setupPhotosNeeded", false))
+        private set
+    var resultPromptUid by mutableStateOf<String?>(null)
+        private set
+    var showFullLog by mutableStateOf(false)
+        private set
+    val resultPrompt: TestResult?
+        get() = resultPromptUid?.let { uid -> results.firstOrNull { it.uid == uid } }
 
     // photoPrompt is persisted so a camera-triggered process restart resumes
     // the photo step instead of losing it.
@@ -103,8 +111,27 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putString("photoPrompt", kind).apply()
     }
     fun dismissPhotoPrompt() {
+        val kind = photoPrompt
+        if (kind == "setup") updateSetupPhotosNeeded(photoCount == 0)
+        if (kind == "after") resultPromptUid = results.firstOrNull()?.uid
         photoPrompt = null
         prefs.edit().remove("photoPrompt").apply()
+    }
+
+    private fun updateSetupPhotosNeeded(needed: Boolean) {
+        setupPhotosNeeded = needed
+        prefs.edit().putBoolean("setupPhotosNeeded", needed).apply()
+    }
+
+    fun requestSetupPhotos() = promptPhotos("setup")
+
+    fun finishResultPrompt(showLog: Boolean = true) {
+        resultPromptUid = null
+        if (showLog) showFullLog = true
+    }
+
+    fun hideFullLog() {
+        showFullLog = false
     }
 
     /** Create the next photo target inside the right test folder. */
@@ -117,7 +144,10 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     fun photosFor(r: TestResult): List<Uri> = session.listPhotos(r.shotFolder)
 
     fun photoSaved(ok: Boolean, uri: Uri) {
-        if (ok) photoCount++
+        if (ok) {
+            photoCount++
+            if (photoPrompt == "setup") updateSetupPhotosNeeded(false)
+        }
         else runCatching {
             getApplication<Application>().contentResolver.delete(uri, null, null)
         }
@@ -574,6 +604,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         screen = Screen.DASHBOARD
         if (inWizard) {
             inWizard = false
+            updateSetupPhotosNeeded(true)
             promptPhotos("setup")   // capture the rig as it stands for this test
         }
     }
@@ -603,6 +634,9 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun arm() = ble.sendCommand(Proto.CMD_ARM)
+    fun recordOrPromptSetupPhotos() {
+        if (setupPhotosNeeded) promptPhotos("setup") else arm()
+    }
     fun disarm() = ble.sendCommand(Proto.CMD_DISARM)
     fun syncTime() = ble.syncTime()
 

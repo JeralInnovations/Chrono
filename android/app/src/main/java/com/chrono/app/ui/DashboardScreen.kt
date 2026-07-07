@@ -41,6 +41,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -218,7 +219,8 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                     running = running,
                     connected = connState == ConnState.CONNECTED || connState == ConnState.RECONNECTING,
                     sensorsReady = vm.sensor1Ready && vm.sensor2Ready,
-                    onArm = { vm.arm() },
+                    setupPhotosNeeded = vm.setupPhotosNeeded,
+                    onArm = { vm.recordOrPromptSetupPhotos() },
                     onDisarm = { vm.disarm() },
                 )
             }
@@ -419,6 +421,24 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
         )
     }
 
+    vm.resultPrompt?.let { r ->
+        EditResultDialog(
+            result = r,
+            title = "Log result",
+            dismissText = "Close",
+            showDelete = false,
+            onDismiss = { vm.finishResultPrompt() },
+            onSave = { label, tool, target, tdVal, tdUnit, outcome, epochMillis ->
+                vm.updateResult(r.uid, label, tool, target, tdVal, tdUnit, outcome, epochMillis)
+                vm.finishResultPrompt()
+            },
+            onAttachPhotos = { uris -> vm.attachPhotosToResult(r.uid, uris) },
+            photosFor = { vm.photosFor(r) },
+            onOpenPhoto = { fullscreenPhoto = it to r.uid },
+            onDelete = {},
+        )
+    }
+
     editing?.let { r ->
         EditResultDialog(
             result = r,
@@ -434,6 +454,18 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                 vm.deleteResult(r.uid)
                 editing = null
             },
+        )
+    }
+
+    if (vm.showFullLog) {
+        FullLogDialog(
+            vm = vm,
+            onExit = { vm.hideFullLog() },
+            onEdit = {
+                vm.hideFullLog()
+                editing = it
+            },
+            onOpenPhoto = { uri, uid -> fullscreenPhoto = uri to uid },
         )
     }
 
@@ -530,6 +562,70 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun FullLogDialog(
+    vm: ChronoViewModel,
+    onExit: () -> Unit,
+    onEdit: (TestResult) -> Unit,
+    onOpenPhoto: (android.net.Uri, String) -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onExit,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(20.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.weight(1f)) {
+                    Text("Test log", style = MaterialTheme.typography.headlineMedium, color = Amber)
+                    Text(
+                        "${vm.results.size} result${if (vm.results.size == 1) "" else "s"}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextDim,
+                    )
+                }
+                TextButton(onClick = onExit) { Text("Exit") }
+            }
+            Spacer(Modifier.height(12.dp))
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                items(vm.results, key = { it.uid }) { r ->
+                    Column {
+                        ResultCard(
+                            r = r,
+                            latest = r == vm.results.firstOrNull(),
+                            ciPercent = vm.ciPercentFor(r),
+                            coverFor = { vm.photosFor(r) },
+                            onEdit = { onEdit(r) },
+                            onOpenPhoto = { onOpenPhoto(it, r.uid) },
+                        )
+                        val photos = vm.photosFor(r)
+                        if (photos.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                items(photos) { uri ->
+                                    AsyncImage(
+                                        model = uri,
+                                        contentDescription = "shot photo",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .size(64.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable { onOpenPhoto(uri, r.uid) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -874,6 +970,7 @@ private fun ArmButton(
     running: Boolean,
     connected: Boolean,
     sensorsReady: Boolean,
+    setupPhotosNeeded: Boolean,
     onArm: () -> Unit,
     onDisarm: () -> Unit,
 ) {
@@ -939,12 +1036,31 @@ private fun ArmButton(
                     enabled = connected && sensorsReady,
                     modifier = Modifier.fillMaxWidth().height(64.dp),
                     shape = RoundedCornerShape(20.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Bad,
+                        contentColor = Color.White,
+                        disabledContainerColor = Bad.copy(alpha = 0.28f),
+                        disabledContentColor = Color.White.copy(alpha = 0.55f),
+                    ),
                 ) {
-                    Text("ARM  —  TEST STANDBY", style = MaterialTheme.typography.labelLarge)
+                    Canvas(modifier = Modifier.size(14.dp).alpha(pulse)) {
+                        drawCircle(Color.White)
+                    }
+                    Spacer(Modifier.size(10.dp))
+                    Text("RECORD", style = MaterialTheme.typography.labelLarge)
+                }
+                if (setupPhotosNeeded && connected && sensorsReady) {
+                    Text(
+                        "Tap Record to add setup photos before test standby.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Bad,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp).alpha(pulse),
+                    )
                 }
                 if (connected && !sensorsReady) {
                     Text(
-                        "Replace and retest both sensors before arming.",
+                        "Replace and retest both sensors before recording.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = TextDim,
                         textAlign = TextAlign.Center,
@@ -1131,6 +1247,9 @@ private fun parseDateField(text: String): Long? =
 @Composable
 private fun EditResultDialog(
     result: TestResult,
+    title: String = "Edit test",
+    dismissText: String = "Cancel",
+    showDelete: Boolean = true,
     onDismiss: () -> Unit,
     onSave: (
         label: String, tool: String, target: String,
@@ -1177,7 +1296,7 @@ private fun EditResultDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Edit test") },
+        title = { Text(title) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
@@ -1261,10 +1380,12 @@ private fun EditResultDialog(
                     Spacer(Modifier.size(6.dp))
                     Text("Add photos", color = Teal)
                 }
-                TextButton(onClick = onDelete) {
-                    Icon(Icons.Filled.Delete, null, tint = Bad, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.size(6.dp))
-                    Text("Delete this result", color = Bad)
+                if (showDelete) {
+                    TextButton(onClick = onDelete) {
+                        Icon(Icons.Filled.Delete, null, tint = Bad, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.size(6.dp))
+                        Text("Delete this result", color = Bad)
+                    }
                 }
             }
         },
@@ -1281,7 +1402,7 @@ private fun EditResultDialog(
             ) { Text("Save") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(dismissText) }
         },
     )
 }
