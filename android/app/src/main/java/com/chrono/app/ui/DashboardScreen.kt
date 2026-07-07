@@ -175,7 +175,9 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Set up new test") }
             }
-            if (vm.setupPhotosNeeded && connState == ConnState.CONNECTED && !armed && !running) {
+            if (vm.setupPhotosNeeded && vm.canAddSetupPhotos &&
+                connState == ConnState.CONNECTED && !armed && !running
+            ) {
                 item {
                     Button(
                         onClick = { vm.requestSetupPhotos() },
@@ -252,7 +254,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                 )
             }
 
-            if (setupPhotos.isNotEmpty()) {
+            if (vm.canAddSetupPhotos && setupPhotos.isNotEmpty()) {
                 item {
                     SetupPhotoStrip(
                         photos = setupPhotos,

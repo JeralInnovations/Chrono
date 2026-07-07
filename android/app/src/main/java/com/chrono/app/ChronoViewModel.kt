@@ -147,6 +147,8 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setupPhotos(): List<Uri> = session.listPromptPhotos("setup", pendingLabel.trim())
 
+    val canAddSetupPhotos: Boolean get() = !session.currentTestLogged()
+
     private fun promptPhotoCount(kind: String): Int = promptPhotos(kind).size
 
     fun importPromptPhotos(uris: List<Uri>) {
@@ -158,6 +160,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         if (added > 0) {
             photoCount += added
             photoRevision++
+            if (kind == "after") autoThumbnailForFirstResultPhoto(results.firstOrNull()?.uid)
             if (kind == "setup") updateSetupPhotosNeeded(false)
         }
     }
@@ -169,6 +172,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         if (ok) {
             photoCount++
             photoRevision++
+            if (photoPrompt == "after") autoThumbnailForFirstResultPhoto(results.firstOrNull()?.uid, uri)
             if (photoPrompt == "setup") updateSetupPhotosNeeded(false)
         }
         else runCatching {
@@ -310,8 +314,9 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
                 targetDistValue = pendingTargetDistVal.replace(',', '.').toDoubleOrNull(),
                 targetDistUnit = pendingTargetDistUnit,
             )
-            results.add(0, rec)
             rec.shotFolder = session.logShot(rec.label, shotJson(rec))
+            rec.thumbnailUri = session.listPhotos(rec.shotFolder).firstOrNull()?.toString() ?: ""
+            results.add(0, rec)
             persist()
             prefs.edit()
                 .putString("pendTool", pendingTool)
@@ -383,9 +388,10 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
             outcome = outcome.trim(),
             manualVelocityMps = mps,
         )
-        results.add(0, rec)
         rec.shotFolder = session.logShot(rec.label, shotJson(rec))
         for (uri in photos) session.importPhoto(rec.shotFolder, uri)
+        rec.thumbnailUri = session.listPhotos(rec.shotFolder).firstOrNull()?.toString() ?: ""
+        results.add(0, rec)
         persist()
         pendingLabel = session.suggestedLabel()
         showPhotoPrompt("after")
@@ -409,7 +415,17 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
             persist()
         }
         for (uri in uris) session.importPhoto(rel, uri)
+        autoThumbnailForFirstResultPhoto(uid)
         photoRevision++
+    }
+
+    private fun autoThumbnailForFirstResultPhoto(uid: String?, preferred: Uri? = null) {
+        if (uid == null) return
+        val idx = results.indexOfFirst { it.uid == uid }
+        if (idx < 0 || results[idx].thumbnailUri.isNotBlank()) return
+        val uri = preferred ?: session.listPhotos(results[idx].shotFolder).firstOrNull() ?: return
+        results[idx] = results[idx].copy(thumbnailUri = uri.toString())
+        persist()
     }
 
     fun deleteResultPhoto(uid: String, uri: Uri) {
@@ -418,6 +434,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
             if (idx >= 0 && results[idx].thumbnailUri == uri.toString()) {
                 results[idx] = results[idx].copy(thumbnailUri = "")
                 persist()
+                autoThumbnailForFirstResultPhoto(uid)
             }
             photoRevision++
         }
