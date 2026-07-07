@@ -95,6 +95,8 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var photoCount by mutableStateOf(0)
         private set
+    var photoRevision by mutableStateOf(0)
+        private set
     var setupPhotosNeeded by mutableStateOf(prefs.getBoolean("setupPhotosNeeded", false))
         private set
     var resultPromptUid by mutableStateOf<String?>(null)
@@ -143,6 +145,8 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     fun promptPhotos(kind: String): List<Uri> =
         session.listPromptPhotos(kind, pendingLabel.trim())
 
+    fun setupPhotos(): List<Uri> = session.listPromptPhotos("setup", pendingLabel.trim())
+
     private fun promptPhotoCount(kind: String): Int = promptPhotos(kind).size
 
     fun importPromptPhotos(uris: List<Uri>) {
@@ -153,6 +157,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         }
         if (added > 0) {
             photoCount += added
+            photoRevision++
             if (kind == "setup") updateSetupPhotosNeeded(false)
         }
     }
@@ -163,10 +168,19 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     fun photoSaved(ok: Boolean, uri: Uri) {
         if (ok) {
             photoCount++
+            photoRevision++
             if (photoPrompt == "setup") updateSetupPhotosNeeded(false)
         }
         else runCatching {
             getApplication<Application>().contentResolver.delete(uri, null, null)
+        }
+    }
+
+    fun deletePromptPhoto(uri: Uri) {
+        val kind = photoPrompt ?: "setup"
+        if (session.deletePhoto(uri)) {
+            photoRevision++
+            if (kind == "setup") updateSetupPhotosNeeded(promptPhotoCount("setup") == 0)
         }
     }
 
@@ -395,6 +409,18 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
             persist()
         }
         for (uri in uris) session.importPhoto(rel, uri)
+        photoRevision++
+    }
+
+    fun deleteResultPhoto(uid: String, uri: Uri) {
+        if (session.deletePhoto(uri)) {
+            val idx = results.indexOfFirst { it.uid == uid }
+            if (idx >= 0 && results[idx].thumbnailUri == uri.toString()) {
+                results[idx] = results[idx].copy(thumbnailUri = "")
+                persist()
+            }
+            photoRevision++
+        }
     }
 
     /** The per-shot log file written into the shot's folder. */
@@ -551,6 +577,21 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         val a = channelLoadNs(1) ?: return null
         val b = channelLoadNs(2) ?: return null
         return abs(a - b)
+    }
+
+    fun capacitanceText(loadNs: Long): String {
+        val pf = loadNs / 12.0
+        val (value, unit) = when {
+            pf >= 1_000_000.0 -> pf / 1_000_000.0 to "uF"
+            pf >= 1_000.0 -> pf / 1_000.0 to "nF"
+            else -> pf to "pF"
+        }
+        val text = when {
+            value >= 100.0 -> "%.0f".format(value)
+            value >= 10.0 -> "%.1f".format(value)
+            else -> "%.2f".format(value)
+        }.trimEnd('0').trimEnd('.')
+        return "$text$unit"
     }
 
     /**

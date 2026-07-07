@@ -9,6 +9,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -65,6 +66,8 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -135,7 +138,10 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
     // (photo uri, owning result uid) so the viewer can offer "set as cover"
     var fullscreenPhoto by remember { mutableStateOf<Pair<android.net.Uri, String>?>(null) }
     var promptPhotoPreview by remember { mutableStateOf<android.net.Uri?>(null) }
+    var selectedPromptPhoto by remember { mutableStateOf<android.net.Uri?>(null) }
+    var selectedSetupPhoto by remember { mutableStateOf<android.net.Uri?>(null) }
     val context = LocalContext.current
+    val photoRevision = vm.photoRevision
 
     // System camera writing straight into the shot folder: no CAMERA permission.
     var pendingPhoto by remember { mutableStateOf<android.net.Uri?>(null) }
@@ -148,6 +154,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
 
     // Manual-logging mode: no device, so hide everything device-specific.
     val offline = connState == ConnState.DISCONNECTED
+    val setupPhotos = remember(photoRevision, vm.pendingLabel) { vm.setupPhotos() }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -244,6 +251,21 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                     onDisarm = { vm.disarm() },
                 )
             }
+
+            if (setupPhotos.isNotEmpty()) {
+                item {
+                    SetupPhotoStrip(
+                        photos = setupPhotos,
+                        selected = selectedSetupPhoto,
+                        onOpen = { promptPhotoPreview = it },
+                        onSelect = { selectedSetupPhoto = it },
+                        onDelete = {
+                            selectedSetupPhoto?.let { vm.deletePromptPhoto(it) }
+                            selectedSetupPhoto = null
+                        },
+                    )
+                }
+            }
         }
 
         item {
@@ -339,8 +361,8 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                                         style = MaterialTheme.typography.bodyMedium,
                                     )
                                     load > 250 -> Text(
-                                        "Sensor detected: capacitance is +%.2f µs over the bare-port baseline (≈ %d pF). Looks attached."
-                                            .format(load / 1000.0, (load / 12.0).toInt()),
+                                        "Sensor detected: capacitance is +%.2f us over the bare-port baseline (about %s). Looks attached."
+                                            .format(load / 1000.0, vm.capacitanceText(load)),
                                         color = Good,
                                         style = MaterialTheme.typography.bodyMedium,
                                     )
@@ -456,6 +478,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
             onAttachPhotos = { uris -> vm.attachPhotosToResult(r.uid, uris) },
             photosFor = { vm.photosFor(r) },
             onOpenPhoto = { fullscreenPhoto = it to r.uid },
+            onDeletePhoto = { uri -> vm.deleteResultPhoto(r.uid, uri) },
             onDelete = {},
         )
     }
@@ -471,6 +494,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
             onAttachPhotos = { uris -> vm.attachPhotosToResult(r.uid, uris) },
             photosFor = { vm.photosFor(r) },
             onOpenPhoto = { fullscreenPhoto = it to r.uid },
+            onDeletePhoto = { uri -> vm.deleteResultPhoto(r.uid, uri) },
             onDelete = {
                 vm.deleteResult(r.uid)
                 editing = null
@@ -541,7 +565,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
 
     // Photo prompts: after setup, and after each recorded shot.
     vm.photoPrompt?.let { kind ->
-        val promptPhotos = vm.promptPhotos(kind)
+        val promptPhotos = remember(photoRevision, kind, vm.pendingLabel) { vm.promptPhotos(kind) }
         val savedCount = promptPhotos.size
         AlertDialog(
             onDismissRequest = { vm.dismissPhotoPrompt() },
@@ -567,15 +591,23 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                         Spacer(Modifier.height(8.dp))
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             items(promptPhotos) { uri ->
-                                AsyncImage(
-                                    model = uri,
-                                    contentDescription = "saved photo",
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier
-                                        .size(72.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .clickable { promptPhotoPreview = uri },
+                                PhotoThumbnail(
+                                    uri = uri,
+                                    selected = selectedPromptPhoto == uri,
+                                    onOpen = { promptPhotoPreview = uri },
+                                    onSelect = { selectedPromptPhoto = uri },
                                 )
+                            }
+                        }
+                        if (selectedPromptPhoto != null) {
+                            Spacer(Modifier.height(8.dp))
+                            TextButton(onClick = {
+                                selectedPromptPhoto?.let { vm.deletePromptPhoto(it) }
+                                selectedPromptPhoto = null
+                            }) {
+                                Icon(Icons.Filled.Delete, null, tint = Bad, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.size(6.dp))
+                                Text("Delete selected", color = Bad)
                             }
                         }
                     }
@@ -634,6 +666,78 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
             }
         }
     }
+}
+
+@Composable
+private fun SetupPhotoStrip(
+    photos: List<android.net.Uri>,
+    selected: android.net.Uri?,
+    onOpen: (android.net.Uri) -> Unit,
+    onSelect: (android.net.Uri) -> Unit,
+    onDelete: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
+            .padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text(
+                "Setup photos",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextDim,
+                modifier = Modifier.weight(1f),
+            )
+            if (selected != null) {
+                TextButton(onClick = onDelete) {
+                    Icon(Icons.Filled.Delete, null, tint = Bad, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.size(6.dp))
+                    Text("Delete", color = Bad)
+                }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(photos) { uri ->
+                PhotoThumbnail(
+                    uri = uri,
+                    selected = selected == uri,
+                    onOpen = { onOpen(uri) },
+                    onSelect = { onSelect(uri) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PhotoThumbnail(
+    uri: android.net.Uri,
+    selected: Boolean,
+    onOpen: () -> Unit,
+    onSelect: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    AsyncImage(
+        model = uri,
+        contentDescription = "saved photo",
+        contentScale = ContentScale.Crop,
+        modifier = modifier
+            .size(72.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .border(
+                width = if (selected) 3.dp else 0.dp,
+                color = if (selected) Bad else Color.Transparent,
+                shape = RoundedCornerShape(8.dp),
+            )
+            .pointerInput(uri) {
+                detectTapGestures(
+                    onTap = { onOpen() },
+                    onLongPress = { onSelect() },
+                )
+            },
+    )
 }
 
 @Composable
@@ -934,7 +1038,7 @@ private fun ChannelsCard(vm: ChronoViewModel, enabled: Boolean) {
             for ((ch, load) in listOf(1 to load1, 2 to load2)) {
                 Text(
                     if (load != null)
-                        "Port $ch load:  +%.2f µs  (≈ %d pF)".format(load / 1000.0, (load / 12.0).toInt())
+                        "Port $ch load:  +%.2f us  (about %s)".format(load / 1000.0, vm.capacitanceText(load))
                     else "Port $ch load:  — not measured",
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextDim,
@@ -956,7 +1060,7 @@ private fun ChannelsCard(vm: ChronoViewModel, enabled: Boolean) {
                     style = MaterialTheme.typography.bodyMedium, color = Good,
                 )
                 else -> Text(
-                    "Channel mismatch Δ $mismatch ns (≈ ${(mismatch / 12.0).toInt()} pF) — " +
+                    "Channel mismatch delta $mismatch ns (about ${vm.capacitanceText(mismatch)}) - " +
                         "check that both cables are the same length and type.",
                     style = MaterialTheme.typography.bodyMedium, color = Amber,
                 )
@@ -1344,10 +1448,12 @@ private fun EditResultDialog(
     onAttachPhotos: (List<android.net.Uri>) -> Unit,
     photosFor: () -> List<android.net.Uri>,
     onOpenPhoto: (android.net.Uri) -> Unit,
+    onDeletePhoto: (android.net.Uri) -> Unit,
     onDelete: () -> Unit,
 ) {
     var photoRefresh by remember { mutableStateOf(0) }
     val photos = remember(photoRefresh) { photosFor() }
+    var selectedPhoto by remember(photoRefresh) { mutableStateOf<android.net.Uri?>(null) }
     val pickImages = rememberLauncherForActivityResult(
         ActivityResultContracts.GetMultipleContents()
     ) { uris ->
@@ -1462,15 +1568,24 @@ private fun EditResultDialog(
                     Spacer(Modifier.height(6.dp))
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(photos) { uri ->
-                            AsyncImage(
-                                model = uri,
-                                contentDescription = "shot photo",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(72.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable { onOpenPhoto(uri) },
+                            PhotoThumbnail(
+                                uri = uri,
+                                selected = selectedPhoto == uri,
+                                onOpen = { onOpenPhoto(uri) },
+                                onSelect = { selectedPhoto = uri },
                             )
+                        }
+                    }
+                    if (selectedPhoto != null) {
+                        Spacer(Modifier.height(6.dp))
+                        TextButton(onClick = {
+                            selectedPhoto?.let { onDeletePhoto(it) }
+                            selectedPhoto = null
+                            photoRefresh++
+                        }) {
+                            Icon(Icons.Filled.Delete, null, tint = Bad, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.size(6.dp))
+                            Text("Delete selected photo", color = Bad)
                         }
                     }
                 }

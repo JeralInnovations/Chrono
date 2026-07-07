@@ -147,6 +147,9 @@ class SessionManager(private val context: Context, simulation: Boolean = false) 
         }.isSuccess
     }
 
+    fun deletePhoto(uri: Uri): Boolean =
+        runCatching { context.contentResolver.delete(uri, null, null) > 0 }.getOrDefault(false)
+
     /** Image files already saved in a shot's folder, for thumbnails. */
     fun listPhotos(rel: String): List<Uri> {
         if (rel.isBlank()) return emptyList()

@@ -313,8 +313,8 @@ fun SensorSetupScreen(
                         Icon(Icons.Filled.CheckCircle, null, tint = Good, modifier = Modifier.size(48.dp))
                         Spacer(Modifier.height(10.dp))
                         Text(
-                            "Sensor detected: +%.2f us over baseline (about %d pF added).".format(
-                                loadNs / 1000.0, (loadNs / 12.0).toInt()
+                            "Sensor detected: +%.2f us over baseline (about %s added).".format(
+                                loadNs / 1000.0, vm.capacitanceText(loadNs)
                             ),
                             color = Good,
                             style = MaterialTheme.typography.bodyLarge,
