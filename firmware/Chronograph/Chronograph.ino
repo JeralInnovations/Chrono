@@ -157,7 +157,7 @@ struct __attribute__((packed)) CalResult {
 // follows automatically — no app update needed.
 const uint8_t HW_REV   = 1;
 const uint8_t FW_MAJOR = 1;
-const uint8_t FW_MINOR = 3;
+const uint8_t FW_MINOR = 4;
 
 struct __attribute__((packed)) HwInfo {
   uint8_t  hwRev;
@@ -167,6 +167,8 @@ struct __attribute__((packed)) HwInfo {
   uint32_t tickPs;        // timer tick period in picoseconds (62500 = 62.5 ns)
   uint16_t clockPpm;      // crystal tolerance
   uint16_t edgeJitterNs;  // conservative per-edge front-end uncertainty
+  uint32_t deviceId0;     // NRF_FICR->DEVICEID[0]
+  uint32_t deviceId1;     // NRF_FICR->DEVICEID[1]
 };
 
 // ------------------------------------------------------- run-time state
@@ -556,7 +558,10 @@ void setup() {
   chInfo.begin();
   // Rev 1: 16 MHz hardware capture, HFXO +/-30 ppm, piezo->GPIO front end
   // with a conservative 300 ns per-edge threshold-walk allowance.
-  HwInfo info = { HW_REV, FW_MAJOR, FW_MINOR, 0, 62500UL, 30, 300 };
+  HwInfo info = {
+    HW_REV, FW_MAJOR, FW_MINOR, 0, 62500UL, 30, 300,
+    NRF_FICR->DEVICEID[0], NRF_FICR->DEVICEID[1]
+  };
   chInfo.write((uint8_t*)&info, sizeof(info));
 
   notifyStatus();

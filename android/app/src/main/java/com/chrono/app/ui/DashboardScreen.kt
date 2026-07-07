@@ -1071,9 +1071,10 @@ private fun ChannelsCard(vm: ChronoViewModel, enabled: Boolean) {
             val hw by vm.ble.hwInfo.collectAsState()
             Text(
                 hw?.let {
-                    "Hardware rev ${it.hwRev} · fw ${it.fwMajor}.${it.fwMinor} · " +
-                        "%.1f ns timer · auto-identified".format(it.tickPs / 1000.0)
-                } ?: "Hardware not identified — assuming rev 1 accuracy",
+                    val serial = it.mcuSerial.ifBlank { "serial unavailable" }
+                    "Hardware rev ${it.hwRev} - fw ${it.fwMajor}.${it.fwMinor} - " +
+                        "%.1f ns timer - $serial".format(it.tickPs / 1000.0)
+                } ?: "Hardware not identified - assuming rev 1 accuracy",
                 style = MaterialTheme.typography.labelSmall,
                 color = TextDim,
             )
@@ -1507,6 +1508,9 @@ private fun EditResultDialog(
                     ReadOnlyLogValue("Velocity", velocityText)
                     ReadOnlyLogValue("Sensor spacing", "%.3f in".format(spacingIn))
                     ReadOnlyLogValue("Split time", result.splitTimeText())
+                    if (result.deviceSerial.isNotBlank()) {
+                        ReadOnlyLogValue("MCU serial", result.deviceSerial)
+                    }
                     Spacer(Modifier.height(10.dp))
                 }
                 OutlinedTextField(

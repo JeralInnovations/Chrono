@@ -25,7 +25,7 @@ object Exporter {
         csv.writeText(buildString {
             appendLine(
                 "simulated,label,tool,target,target_dist_value,target_dist_unit,result,source,date_iso," +
-                    "split_time,split_ns,split_ms,distance_m,velocity_mps,velocity_fps"
+                    "mcu_serial,split_time,split_ns,split_ms,distance_m,velocity_mps,velocity_fps"
             )
             for (r in results) {
                 val date = r.epochMillis?.let { Instant.ofEpochMilli(it).toString() } ?: ""
@@ -34,7 +34,7 @@ object Exporter {
                         esc(r.label) + "," + esc(r.tool) + "," + esc(r.target) + "," +
                         (r.targetDistValue?.toString() ?: "") + "," + r.targetDistUnit + "," +
                         esc(r.outcome) + "," + (if (r.isManual) "manual" else "device") + "," +
-                        date + "," + esc(r.splitTimeText()) + "," + r.splitNs + "," +
+                        date + "," + esc(r.deviceSerial) + "," + esc(r.splitTimeText()) + "," + r.splitNs + "," +
                         String.format(Locale.US, "%.6f", r.splitMillis) + "," +
                         String.format(Locale.US, "%.5f", r.distanceM) + "," +
                         String.format(Locale.US, "%.3f", r.metersPerSecond) + "," +

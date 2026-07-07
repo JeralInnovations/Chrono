@@ -73,6 +73,7 @@ data class HwInfo(
     val tickPs: Long,         // timer tick period, picoseconds
     val clockPpm: Int,        // crystal tolerance
     val edgeJitterNs: Int,    // per-edge front-end uncertainty
+    val mcuSerial: String = "",
 ) {
     companion object {
         /** Assumed when the device predates the INFO characteristic. */
@@ -210,6 +211,7 @@ class ChronoBle(private val context: Context) {
     private var simTimeValid = false
     private var simNextId = 1
     private var simBarePhase = true
+    private val simBufferedResults = mutableListOf<RawResult>()
 
     fun connectSimulated() {
         stopScan()
@@ -218,7 +220,8 @@ class ChronoBle(private val context: Context) {
         simPending = 0
         simTimeValid = false
         simBarePhase = true
-        hwInfo.value = HwInfo(1, 1, 4, 62_500, 30, 300)   // pretends to be rev 1
+        simBufferedResults.clear()
+        hwInfo.value = HwInfo(1, 1, 4, 62_500, 30, 300, "SIM-0001")   // training identity
         pushSimStatus()
         connState.value = ConnState.CONNECTED
     }
@@ -226,8 +229,12 @@ class ChronoBle(private val context: Context) {
     /** Toggle the link for testing: drop to RECONNECTING, tap again to restore. */
     fun simulateSignalLoss() {
         if (!isSimulation) return
-        connState.value = if (connState.value == ConnState.RECONNECTING) ConnState.CONNECTED
-        else ConnState.RECONNECTING
+        if (connState.value == ConnState.RECONNECTING) {
+            connState.value = ConnState.CONNECTED
+            flushSimBufferedResults()
+        } else {
+            connState.value = ConnState.RECONNECTING
+        }
     }
 
     private fun pushSimStatus() {
@@ -248,7 +255,7 @@ class ChronoBle(private val context: Context) {
                 if (simPending > 0) simPending--
                 pushSimStatus()
             }
-            Proto.CMD_FETCH -> Unit   // nothing buffered in simulation
+            Proto.CMD_FETCH -> flushSimBufferedResults()
             Proto.CMD_CALIBRATE -> simCalibrate(arg)
         }
     }
@@ -313,10 +320,20 @@ class ChronoBle(private val context: Context) {
             val epoch = if (simTimeValid) System.currentTimeMillis() / 1000L else 0L
             simPending++
             pushSimStatus()
-            results.tryEmit(RawResult(simNextId++, split, epoch))
+            val result = RawResult(simNextId++, split, epoch)
+            if (connState.value == ConnState.CONNECTED) results.tryEmit(result)
+            else simBufferedResults.add(result)
             simState = Proto.ST_IDLE
             pushSimStatus()
         }
+    }
+
+    private fun flushSimBufferedResults() {
+        if (!isSimulation || simBufferedResults.isEmpty()) return
+        val pending = simBufferedResults.toList()
+        simBufferedResults.clear()
+        for (r in pending) results.tryEmit(r)
+        pushSimStatus()
     }
 
     /** A split that yields a random, realistic muzzle velocity for the set gap. */
@@ -529,7 +546,12 @@ class ChronoBle(private val context: Context) {
                 val tickPs = b.int.toLong() and 0xFFFFFFFFL
                 val clockPpm = b.short.toInt() and 0xFFFF
                 val edgeJitterNs = b.short.toInt() and 0xFFFF
-                hwInfo.value = HwInfo(hwRev, fwMajor, fwMinor, tickPs, clockPpm, edgeJitterNs)
+                val serial = if (v.size >= 20) {
+                    val id0 = b.int.toLong() and 0xFFFFFFFFL
+                    val id1 = b.int.toLong() and 0xFFFFFFFFL
+                    "%08X%08X".format(id1, id0)
+                } else ""
+                hwInfo.value = HwInfo(hwRev, fwMajor, fwMinor, tickPs, clockPpm, edgeJitterNs, serial)
             }
         }
     }

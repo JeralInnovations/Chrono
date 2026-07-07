@@ -313,6 +313,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
                 target = pendingTarget.trim(),
                 targetDistValue = pendingTargetDistVal.replace(',', '.').toDoubleOrNull(),
                 targetDistUnit = pendingTargetDistUnit,
+                deviceSerial = ble.hwInfo.value?.mcuSerial.orEmpty(),
             )
             rec.shotFolder = session.logShot(rec.label, shotJson(rec))
             rec.thumbnailUri = session.listPhotos(rec.shotFolder).firstOrNull()?.toString() ?: ""
@@ -454,6 +455,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         .put("velocityMps", r.metersPerSecond)
         .put("velocityFps", r.feetPerSecond)
         .put("ciPercent", ciPercentFor(r))
+        .put("deviceSerial", r.deviceSerial)
         .put("epochMillis", r.epochMillis ?: -1L)
         .apply { r.targetDistValue?.let { put("targetDistValue", it) } }
 

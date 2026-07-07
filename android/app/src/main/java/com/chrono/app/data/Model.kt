@@ -28,6 +28,8 @@ data class TestResult(
     var outcome: String = "",
     /** set on manual entries (deviceResultId < 0) that were typed in, not measured */
     var manualVelocityMps: Double? = null,
+    /** MCU identity captured from the hardware info characteristic for traceability. */
+    var deviceSerial: String = "",
     /** folder id under ChronoData holding this shot's log and photos */
     var shotFolder: String = "",
     /** user-chosen cover image URI for this shot ("" = use the first photo) */
@@ -121,6 +123,7 @@ class ResultStore(context: Context, simulation: Boolean = false) {
                     target = o.optString("target", ""),
                     outcome = o.optString("outcome", ""),
                     manualVelocityMps = o.optDouble("manualVelocityMps").takeIf { !it.isNaN() },
+                    deviceSerial = o.optString("deviceSerial", ""),
                     shotFolder = o.optString("shotFolder", ""),
                     thumbnailUri = o.optString("thumbnailUri", ""),
                 )
@@ -143,6 +146,7 @@ class ResultStore(context: Context, simulation: Boolean = false) {
                     .put("targetDistUnit", r.targetDistUnit)
                     .put("target", r.target)
                     .put("outcome", r.outcome)
+                    .put("deviceSerial", r.deviceSerial)
                     .put("shotFolder", r.shotFolder)
                     .put("thumbnailUri", r.thumbnailUri)
                     .apply {
