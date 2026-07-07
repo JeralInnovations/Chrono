@@ -43,13 +43,18 @@ const uint8_t SENSOR2_PIN = 1;   // nice!nano D1 - STOP
 const uint8_t CHARGE1_PIN = 2;   // D2 -> 10k 1% -> sensor-1 node (calibration)
 const uint8_t CHARGE2_PIN = 3;   // D3 -> 10k 1% -> sensor-2 node (calibration)
 
-#if defined(LED_BUILTIN) && defined(PINS_COUNT) && (LED_BUILTIN < PINS_COUNT)
-  #define CHRONO_HAS_STATUS_LED 1
-#else
-  #define CHRONO_HAS_STATUS_LED 0
-#endif
+// The nice!nano board profile does not expose this LED as an Arduino pin.
+// Drive the nRF52840 GPIO directly: P0.15, high-drive, active-high.
+const uint32_t STATUS_LED_GPIO = 15;
 
-#define CHRONO_LED_LEVEL(on) ((on) ? LED_STATE_ON : !LED_STATE_ON)
+#define STATUS_LED_BEGIN() do { \
+  nrf_gpio_cfg(STATUS_LED_GPIO, NRF_GPIO_PIN_DIR_OUTPUT, \
+               NRF_GPIO_PIN_INPUT_DISCONNECT, NRF_GPIO_PIN_NOPULL, \
+               NRF_GPIO_PIN_H0H1, NRF_GPIO_PIN_NOSENSE); \
+  nrf_gpio_pin_clear(STATUS_LED_GPIO); \
+} while (0)
+
+#define STATUS_LED_WRITE(on) nrf_gpio_pin_write(STATUS_LED_GPIO, (on) ? 1 : 0)
 
 // Hardware channels for the capture path. The S140 SoftDevice reserves
 // PPI channels 17-31 and groups 4-5, so low numbers are free for us.
@@ -503,10 +508,7 @@ void onDisconnect(uint16_t conn_hdl, uint8_t reason) {
 
 // ------------------------------------------------------------------ setup
 void setup() {
-  if (CHRONO_HAS_STATUS_LED) {
-    pinMode(LED_BUILTIN, OUTPUT);
-    digitalWrite(LED_BUILTIN, CHRONO_LED_LEVEL(false));
-  }
+  STATUS_LED_BEGIN();
 
   Bluefruit.begin();
   Bluefruit.setTxPower(4);
@@ -634,13 +636,11 @@ void loop() {
     }
   }
 
-  // Use the board profile LED if one exists. nice!nano v2 declares none.
-  if (CHRONO_HAS_STATUS_LED) {
-    if (state == ST_ARMED) {
-      digitalWrite(LED_BUILTIN, CHRONO_LED_LEVEL(((millis() / 1000UL) % 2UL) == 0UL));
-    } else {
-      digitalWrite(LED_BUILTIN, CHRONO_LED_LEVEL(state == ST_RUNNING));
-    }
+  // Status LED on P0.15: standby blinks 1s on / 1s off, timing solid on.
+  if (state == ST_ARMED) {
+    STATUS_LED_WRITE(((millis() / 1000UL) % 2UL) == 0UL);
+  } else {
+    STATUS_LED_WRITE(state == ST_RUNNING);
   }
 
   delay(2);
