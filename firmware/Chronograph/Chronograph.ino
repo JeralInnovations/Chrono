@@ -43,6 +43,14 @@ const uint8_t SENSOR2_PIN = 1;   // nice!nano D1 - STOP
 const uint8_t CHARGE1_PIN = 2;   // D2 -> 10k 1% -> sensor-1 node (calibration)
 const uint8_t CHARGE2_PIN = 3;   // D3 -> 10k 1% -> sensor-2 node (calibration)
 
+#if defined(LED_BUILTIN) && defined(PINS_COUNT) && (LED_BUILTIN < PINS_COUNT)
+  #define CHRONO_HAS_STATUS_LED 1
+#else
+  #define CHRONO_HAS_STATUS_LED 0
+#endif
+
+#define CHRONO_LED_LEVEL(on) ((on) ? LED_STATE_ON : !LED_STATE_ON)
+
 // Hardware channels for the capture path. The S140 SoftDevice reserves
 // PPI channels 17-31 and groups 4-5, so low numbers are free for us.
 const uint8_t GPIOTE_S1 = 0;
@@ -495,8 +503,10 @@ void onDisconnect(uint16_t conn_hdl, uint8_t reason) {
 
 // ------------------------------------------------------------------ setup
 void setup() {
-  pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(LED_BUILTIN, HIGH);            // XIAO LEDs are active-LOW
+  if (CHRONO_HAS_STATUS_LED) {
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, CHRONO_LED_LEVEL(false));
+  }
 
   Bluefruit.begin();
   Bluefruit.setTxPower(4);
@@ -624,11 +634,13 @@ void loop() {
     }
   }
 
-  // LED is active-LOW. Standby blinks 1s on / 1s off; timing stays solid on.
-  if (state == ST_ARMED) {
-    digitalWrite(LED_BUILTIN, ((millis() / 1000UL) % 2UL == 0UL) ? LOW : HIGH);
-  } else {
-    digitalWrite(LED_BUILTIN, (state == ST_RUNNING) ? LOW : HIGH);
+  // Use the board profile LED if one exists. nice!nano v2 declares none.
+  if (CHRONO_HAS_STATUS_LED) {
+    if (state == ST_ARMED) {
+      digitalWrite(LED_BUILTIN, CHRONO_LED_LEVEL(((millis() / 1000UL) % 2UL) == 0UL));
+    } else {
+      digitalWrite(LED_BUILTIN, CHRONO_LED_LEVEL(state == ST_RUNNING));
+    }
   }
 
   delay(2);
