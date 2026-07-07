@@ -1,5 +1,5 @@
 /*
- * Chrono — BLE chronograph firmware for the Seeed Studio XIAO nRF52840
+ * Chrono — BLE chronograph firmware for the nice!nano v2 nRF52840
  * ---------------------------------------------------------------------
  * Two piezo triggers act as START and STOP gates. When armed, a rising
  * edge on SENSOR 1 marks the start and a rising edge on SENSOR 2 marks
@@ -29,7 +29,7 @@
  *   Pins use the internal pull-DOWN; a trigger is any rising edge past the
  *   input threshold. Match the two channels (piezo, clamp, CABLE LENGTH).
  *
- * Board package: "Seeed nRF52 Boards" (Adafruit-based core). The
+ * Board package: JeralInnovations/nicenano-v2-arduino. The
  * Bluefruit BLE library ships with that core — nothing extra to install.
  */
 
@@ -38,8 +38,8 @@
 #include <nrf_soc.h>
 
 // ---------------------------------------------------------------- pins
-const uint8_t SENSOR1_PIN = 0;   // XIAO pin labeled "0" (D0) — START
-const uint8_t SENSOR2_PIN = 1;   // XIAO pin labeled "1" (D1) — STOP
+const uint8_t SENSOR1_PIN = 0;   // nice!nano D0 - START
+const uint8_t SENSOR2_PIN = 1;   // nice!nano D1 - STOP
 const uint8_t CHARGE1_PIN = 2;   // D2 -> 10k 1% -> sensor-1 node (calibration)
 const uint8_t CHARGE2_PIN = 3;   // D3 -> 10k 1% -> sensor-2 node (calibration)
 

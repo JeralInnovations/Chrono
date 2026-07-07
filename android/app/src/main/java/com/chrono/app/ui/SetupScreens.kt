@@ -122,6 +122,8 @@ fun VerifyPane(
 fun BaselineScreen(vm: ChronoViewModel, connState: ConnState) {
     val b1 = vm.calData["b1"]
     val b2 = vm.calData["b2"]
+    val baselineDone = b1 != null && b2 != null
+    val baselineWarning = baselineDone && (b1?.isUsable != true || b2?.isUsable != true)
 
     Column(
         modifier = Modifier.fillMaxSize().padding(28.dp).verticalScroll(rememberScrollState()),
@@ -162,12 +164,22 @@ fun BaselineScreen(vm: ChronoViewModel, connState: ConnState) {
         CalRow("Port 1", vm.calData["b1"])
         Spacer(Modifier.height(8.dp))
         CalRow("Port 2", vm.calData["b2"])
+        if (baselineWarning) {
+            Spacer(Modifier.height(14.dp))
+            Text(
+                "Baseline did not return usable capacitance samples. You can continue to the tap tests, " +
+                    "but capacitance-based sensor detection and confidence estimates will be limited.",
+                color = Amber,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+            )
+        }
 
         Spacer(Modifier.weight(1f))
         Spacer(Modifier.height(24.dp))
         Button(
             onClick = { vm.continueToSensor1() },
-            enabled = b1 != null && b2 != null && !vm.calRunning,
+            enabled = baselineDone && !vm.calRunning,
             modifier = Modifier.fillMaxWidth().height(54.dp),
         ) { Text("Continue to sensor 1") }
     }
@@ -180,17 +192,19 @@ private fun CalRow(label: String, entry: com.chrono.app.CalEntry?) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-        if (entry == null) {
-            Text("—", color = TextDim)
-        } else {
-            Text(
-                "%.2f µs  ·  σ %d ns  ·  n=%d".format(
-                    entry.medianNs / 1000.0, entry.stddevNs, entry.samples
-                ),
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (entry.status == 0) TextDim else Amber,
+        val text = when {
+            entry == null -> "-"
+            !entry.isUsable && entry.status == 2 -> "No usable samples - n=${entry.samples}"
+            !entry.isUsable -> "Incomplete - n=${entry.samples}"
+            else -> "%.2f us  -  sigma %d ns  -  n=%d".format(
+                entry.medianNs / 1000.0, entry.stddevNs, entry.samples
             )
         }
+        Text(
+            text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (entry == null || entry.status == 0) TextDim else Amber,
+        )
     }
 }
 
@@ -213,6 +227,8 @@ fun SensorSetupScreen(
     }
 
     val loadNs = vm.channelLoadNs(sensor)
+    val baselineEntry = vm.calData["b$sensor"]
+    val loadEntry = vm.calData["l$sensor"]
     val role = if (sensor == 1) "START" else "STOP"
 
     Column(
@@ -277,15 +293,27 @@ fun SensorSetupScreen(
                     Spacer(Modifier.height(10.dp))
                     Text("Checking capacitance…", color = TextDim)
                 } else when {
-                    loadNs == null -> Text(
-                        "Couldn't measure — check the connection to the device.",
+                    loadEntry == null -> Text(
+                        "No capacitance attempt recorded. Press Re-measure, or continue to the tap test if the sensor is physically installed.",
                         color = Amber, textAlign = TextAlign.Center,
                     )
-                    loadNs > 250 -> {
+                    loadEntry.isUsable != true -> Text(
+                        "Capacitance check returned no usable samples. Continue with the tap test to verify impact detection, or re-measure after checking the leads.",
+                        color = Amber,
+                        style = MaterialTheme.typography.bodyLarge,
+                        textAlign = TextAlign.Center,
+                    )
+                    baselineEntry?.isUsable != true -> Text(
+                        "Baseline was not usable, so the app cannot compare capacitance. Continue with the tap test to verify this sensor.",
+                        color = Amber,
+                        style = MaterialTheme.typography.bodyLarge,
+                        textAlign = TextAlign.Center,
+                    )
+                    loadNs != null && loadNs > 250 -> {
                         Icon(Icons.Filled.CheckCircle, null, tint = Good, modifier = Modifier.size(48.dp))
                         Spacer(Modifier.height(10.dp))
                         Text(
-                            "Sensor detected: +%.2f µs over baseline (≈ %d pF added).".format(
+                            "Sensor detected: +%.2f us over baseline (about %d pF added).".format(
                                 loadNs / 1000.0, (loadNs / 12.0).toInt()
                             ),
                             color = Good,
@@ -294,8 +322,7 @@ fun SensorSetupScreen(
                         )
                     }
                     else -> Text(
-                        "No capacitance increase over the empty-port baseline — the " +
-                            "sensor doesn't look attached. Check the clips and re-measure.",
+                        "No capacitance increase over the empty-port baseline. The sensor may not be attached; check the clips, or continue to the tap test if you want to verify impact detection directly.",
                         color = Amber,
                         style = MaterialTheme.typography.bodyLarge,
                         textAlign = TextAlign.Center,
@@ -312,9 +339,9 @@ fun SensorSetupScreen(
                     Spacer(Modifier.size(12.dp))
                     Button(
                         onClick = { vm.beginTapTest(sensor); step = "tap" },
-                        enabled = !vm.calRunning && loadNs != null,
+                        enabled = !vm.calRunning && loadEntry != null,
                         modifier = Modifier.weight(1f),
-                    ) { Text("Tap test →") }
+                    ) { Text("Tap test") }
                 }
             }
 

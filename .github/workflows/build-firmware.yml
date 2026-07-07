@@ -21,16 +21,16 @@ jobs:
       - name: Install adafruit-nrfutil (DFU packaging tool the core invokes)
         run: pip install adafruit-nrfutil
 
-      - name: Install Seeed nRF52 core
+      - name: Install nice!nano v2 core
         run: |
           arduino-cli config init
           arduino-cli config add board_manager.additional_urls \
-            https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json
+            https://raw.githubusercontent.com/JeralInnovations/nicenano-v2-arduino/master/package_nicenano_index.json
           arduino-cli core update-index
-          arduino-cli core install Seeeduino:nrf52
+          arduino-cli core install nicenano:nrf52
 
       - name: Compile sketch
         run: |
           arduino-cli compile \
-            --fqbn Seeeduino:nrf52:xiaonRF52840 \
+            --fqbn nicenano:nrf52:nicenanov2pf \
             firmware/Chronograph

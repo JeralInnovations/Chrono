@@ -40,7 +40,9 @@ data class CalEntry(
     val samples: Int,
     val status: Int,
     val at: Long,
-)
+) {
+    val isUsable: Boolean get() = status != 2 && samples > 0
+}
 
 class ChronoViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -403,17 +405,19 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     private fun onCalReading(r: CalReading) {
         calTimeoutJob?.cancel()
         val slot = pendingCal
-        if (slot != null && slot.first == r.channel && r.status != 2) {
-            val key = (if (slot.second == CalPhase.BARE) "b" else "l") + r.channel
-            val e = CalEntry(r.medianNs, r.stddevNs, r.samples, r.status, System.currentTimeMillis())
-            calData[key] = e
-            prefs.edit()
-                .putString(calKey(key), "${e.medianNs},${e.stddevNs},${e.samples},${e.status},${e.at}")
-                .apply()
-            appendCalHistory(key, r)
-        }
+        if (slot != null && slot.first == r.channel) recordCal(slot, r)
         pendingCal = null
         nextCal()
+    }
+
+    private fun recordCal(slot: Pair<Int, CalPhase>, r: CalReading) {
+        val key = (if (slot.second == CalPhase.BARE) "b" else "l") + slot.first
+        val e = CalEntry(r.medianNs, r.stddevNs, r.samples, r.status, System.currentTimeMillis())
+        calData[key] = e
+        prefs.edit()
+            .putString(calKey(key), "${e.medianNs},${e.stddevNs},${e.samples},${e.status},${e.at}")
+            .apply()
+        appendCalHistory(key, r)
     }
 
     private fun enqueueCal(items: List<Pair<Int, CalPhase>>) {
@@ -433,7 +437,22 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         ble.sendCommand(Proto.CMD_CALIBRATE, next.first)
         calTimeoutJob?.cancel()
         calTimeoutJob = viewModelScope.launch {
-            delay(15_000)   // device never answered (e.g. old firmware) — move on
+            delay(5_000)   // device never answered (e.g. old firmware) - move on
+            val timedOut = pendingCal
+            if (timedOut != null) {
+                recordCal(
+                    timedOut,
+                    CalReading(
+                        channel = timedOut.first,
+                        status = 2,
+                        samples = 0,
+                        medianNs = 0,
+                        meanNs = 0,
+                        stddevNs = 0,
+                        minNs = 0,
+                    ),
+                )
+            }
             pendingCal = null
             nextCal()
         }
@@ -474,6 +493,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     fun channelLoadNs(channel: Int): Long? {
         val b = calData["b$channel"] ?: return null
         val l = calData["l$channel"] ?: return null
+        if (!b.isUsable || !l.isUsable) return null
         return l.medianNs - b.medianNs
     }
 

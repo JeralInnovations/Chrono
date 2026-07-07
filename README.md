@@ -1,6 +1,6 @@
 # Chrono — BLE Chronograph
 
-A two-sensor chronograph built on the **Seeed Studio XIAO nRF52840**, controlled by a
+A two-sensor chronograph built on the **nice!nano v2 nRF52840**, controlled by a
 native **Android app** over Bluetooth Low Energy.
 
 - Sensor 1 (START) pulls input **D0** high → the clock starts
@@ -11,7 +11,7 @@ native **Android app** over Bluetooth Low Energy.
 
 ```
 Chrono/
-├── firmware/Chronograph/Chronograph.ino   ← flash this to the XIAO
+├── firmware/Chronograph/Chronograph.ino   ← flash this to the nice!nano
 ├── android/                               ← open this folder in Android Studio
 └── README.md
 ```
@@ -57,21 +57,21 @@ same piezo type, same clamp diodes, and **the same cable length** (~5 ns/m).
 
 ---
 
-## 2. Firmware — flashing the XIAO nRF52840
+## 2. Firmware - flashing the nice!nano v2 nRF52840
 
 1. **Install the Arduino IDE** (2.x) from https://www.arduino.cc/en/software
-2. **Add the Seeed board package:**
+2. **Add the nice!nano board package:**
    - *File → Preferences → Additional boards manager URLs*, paste:
      ```
-     https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json
+     https://raw.githubusercontent.com/JeralInnovations/nicenano-v2-arduino/master/package_nicenano_index.json
      ```
-   - *Tools → Board → Boards Manager*, search **"seeed nrf52"** and install
-     **Seeed nRF52 Boards** (NOT the "mbed-enabled" one — this project uses the
-     Bluefruit BLE library that ships with the non-mbed package).
+   - *Tools -> Board -> Boards Manager*, search **"nice!nano"** and install
+     **nice!nano v2 Boards**.
+
 3. **Open the sketch:** `firmware/Chronograph/Chronograph.ino`
-4. **Select the board:** *Tools → Board → Seeed nRF52 Boards → Seeed XIAO nRF52840*
-   (the "Sense" variant also works).
-5. **Plug in the XIAO** over USB-C and select its port under *Tools → Port*.
+4. **Select the board:** *Tools -> Board -> nice!nano v2 Boards -> nice!nano v2*.
+
+5. **Plug in the nice!nano** over USB-C and select its port under *Tools → Port*.
 6. Click **Upload** (→ arrow button).
 
 **If the upload fails or no port appears:** double-tap the tiny RESET button next
