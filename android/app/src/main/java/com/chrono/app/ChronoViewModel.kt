@@ -45,9 +45,14 @@ data class CalEntry(
 class ChronoViewModel(app: Application) : AndroidViewModel(app) {
 
     val ble = ChronoBle(app)
-    private val store = ResultStore(app)
+    private val realStore = ResultStore(app, simulation = false)
+    private val simStore = ResultStore(app, simulation = true)
+    private val store: ResultStore get() = if (ble.isSimulation) simStore else realStore
     private val prefs = app.getSharedPreferences("chrono", Application.MODE_PRIVATE)
-    val session = SessionManager(app)
+    private val realSession = SessionManager(app, simulation = false)
+    private val simSession = SessionManager(app, simulation = true)
+    /** Active data sink; simulated runs are fully isolated from real ones. */
+    val session: SessionManager get() = if (ble.isSimulation) simSession else realSession
 
     var screen by mutableStateOf(Screen.CONNECT)
         private set
@@ -154,6 +159,8 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     // --------------------------------------------------------- calibration
     // Keys: "b1"/"b2" = bare-port baseline, "l1"/"l2" = loaded (sensor attached).
     val calData = mutableStateMapOf<String, CalEntry>()
+    // Tracks which mode's records are currently loaded (null until first load).
+    private var loadedMode: Boolean? = null
     var calRunning by mutableStateOf(false)
         private set
     private val calQueue = ArrayDeque<Pair<Int, CalPhase>>()
@@ -161,15 +168,8 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     private var calTimeoutJob: Job? = null
 
     init {
-        results.addAll(store.load())
         ble.simDistanceM = distanceM
-        for (key in listOf("b1", "b2", "l1", "l2")) {
-            prefs.getString("cal_$key", null)?.split(",")?.let { p ->
-                if (p.size >= 5) calData[key] = CalEntry(
-                    p[0].toLong(), p[1].toLong(), p[2].toInt(), p[3].toInt(), p[4].toLong()
-                )
-            }
-        }
+        reloadForMode()
         viewModelScope.launch { ble.cal.collect { onCalReading(it) } }
         viewModelScope.launch { ble.results.collect { onRawResult(it) } }
         // Latch sensor readiness whenever a verify test passes (wizard or retest).
@@ -187,6 +187,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
                 when (cs) {
                     ConnState.CONNECTED -> {
                         setUiMode(if (ble.isSimulation) "sim" else "real")
+                        reloadForMode()   // swap to this mode's isolated records
                         if (screen == Screen.CONNECT) {
                             screen = if (setupDone) Screen.DASHBOARD else Screen.BASELINE
                         }
@@ -208,13 +209,13 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
 
-        // Restore after a process restart (e.g. camera killed us mid-session).
+        // A camera capture can kill the process mid-session; restore that prompt.
         photoPrompt = prefs.getString("photoPrompt", null)
-        when (prefs.getString("uiMode", "")) {
-            "sim" -> ble.connectSimulated()   // collector routes to the right screen
-            "manual" -> screen = Screen.DASHBOARD
-            // "real"/"" : stay on CONNECT; scanning reconnects a real device
-        }
+        // Always launch to the mode-select menu (CONNECT). We deliberately do NOT
+        // auto-resume a previous sim/manual session — simulated data must never
+        // masquerade as a live run, and the user picks Standard vs Simulation on
+        // every power-up. A real device simply re-pairs from the scan list,
+        // restoring an in-progress session automatically once it reconnects.
     }
 
     // -------------------------------------------------------------- results
@@ -369,6 +370,34 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun persist() = store.save(results.toList())
 
+    /** Per-mode namespacing so simulated calibration never touches real cal data. */
+    private fun calKey(key: String) = if (ble.isSimulation) "cal_sim_$key" else "cal_$key"
+    private fun calHistoryFile() = File(
+        getApplication<Application>().filesDir,
+        if (ble.isSimulation) "cal_history_sim.jsonl" else "cal_history.jsonl"
+    )
+
+    // Swap all in-memory records to the active mode's isolated store. Called at
+    // startup and whenever a connection establishes the real/sim mode, so real
+    // and simulated results, calibration, and folders never intermix.
+    private fun reloadForMode() {
+        val sim = ble.isSimulation
+        if (loadedMode == sim) return
+        loadedMode = sim
+        results.clear()
+        results.addAll(store.load())
+        calData.clear()
+        for (key in listOf("b1", "b2", "l1", "l2")) {
+            prefs.getString(calKey(key), null)?.split(",")?.let { p ->
+                if (p.size >= 5) calData[key] = CalEntry(
+                    p[0].toLong(), p[1].toLong(), p[2].toInt(), p[3].toInt(), p[4].toLong()
+                )
+            }
+        }
+        pendingLabel = session.suggestedLabel()
+        projectPrompt = session.needsProjectPrompt()
+    }
+
     // --------------------------------------------------- calibration engine
 
     private fun onCalReading(r: CalReading) {
@@ -379,7 +408,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
             val e = CalEntry(r.medianNs, r.stddevNs, r.samples, r.status, System.currentTimeMillis())
             calData[key] = e
             prefs.edit()
-                .putString("cal_$key", "${e.medianNs},${e.stddevNs},${e.samples},${e.status},${e.at}")
+                .putString(calKey(key), "${e.medianNs},${e.stddevNs},${e.samples},${e.status},${e.at}")
                 .apply()
             appendCalHistory(key, r)
         }
@@ -437,8 +466,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
                 .put("minNs", r.minNs)
                 .put("samples", r.samples)
                 .put("status", r.status)
-            File(getApplication<Application>().filesDir, "cal_history.jsonl")
-                .appendText(line.toString() + "\n")
+            calHistoryFile().appendText(line.toString() + "\n")
         }
     }
 

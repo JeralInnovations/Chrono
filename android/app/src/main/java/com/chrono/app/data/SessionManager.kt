@@ -35,10 +35,16 @@ import java.util.Locale
  * files) on Android 10+. On 9 and below the same tree lives under
  * Android/data/com.chrono.app/files/ChronoData.
  */
-class SessionManager(private val context: Context) {
+class SessionManager(private val context: Context, simulation: Boolean = false) {
 
-    private val prefs = context.getSharedPreferences("chrono_session", Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences(
+        if (simulation) "chrono_session_sim" else "chrono_session", Context.MODE_PRIVATE
+    )
     private val useMediaStore = Build.VERSION.SDK_INT >= 29
+
+    // Simulated sessions live in a clearly-labelled sibling folder so their logs
+    // and photos never mix with real range data.
+    private val rootDir = if (simulation) "ChronoData_SIMULATION" else "ChronoData"
 
     var projectName: String? = prefs.getString("projectName", null)
         private set
@@ -55,7 +61,7 @@ class SessionManager(private val context: Context) {
     /** Default label for the next test: Test1, Test2, … within this project. */
     fun suggestedLabel(): String = "Test${testCounter + 1}"
 
-    val pathLabel: String get() = "Documents/ChronoData/${projectName ?: ""}"
+    val pathLabel: String get() = "Documents/$rootDir/${projectName ?: ""}"
 
     fun startProject(name: String) {
         projectName = sanitize(name.ifBlank { today() })
@@ -144,7 +150,7 @@ class SessionManager(private val context: Context) {
                     arrayOf(MediaStore.MediaColumns._ID),
                     "${MediaStore.MediaColumns.RELATIVE_PATH}=? AND " +
                         "${MediaStore.MediaColumns.MIME_TYPE} LIKE 'image/%'",
-                    arrayOf("Documents/ChronoData/$rel/"),
+                    arrayOf("Documents/$rootDir/$rel/"),
                     "${MediaStore.MediaColumns._ID} ASC",
                 )?.use { c ->
                     val idc = c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
@@ -153,7 +159,7 @@ class SessionManager(private val context: Context) {
             }
             out
         } else {
-            val dir = File(context.getExternalFilesDir(null) ?: context.filesDir, "ChronoData/$rel")
+            val dir = File(context.getExternalFilesDir(null) ?: context.filesDir, "$rootDir/$rel")
             dir.listFiles { f -> f.extension.lowercase() in setOf("jpg", "jpeg", "png") }
                 ?.sortedBy { it.name }
                 ?.mapNotNull {
@@ -171,13 +177,13 @@ class SessionManager(private val context: Context) {
             val cv = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
                 put(MediaStore.MediaColumns.MIME_TYPE, mime)
-                put(MediaStore.MediaColumns.RELATIVE_PATH, "Documents/ChronoData/$rel")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "Documents/$rootDir/$rel")
             }
             runCatching {
                 context.contentResolver.insert(MediaStore.Files.getContentUri("external"), cv)
             }.getOrNull()
         } else {
-            val dir = File(context.getExternalFilesDir(null) ?: context.filesDir, "ChronoData/$rel")
+            val dir = File(context.getExternalFilesDir(null) ?: context.filesDir, "$rootDir/$rel")
             dir.mkdirs()
             runCatching {
                 FileProvider.getUriForFile(
@@ -208,8 +214,8 @@ class SessionManager(private val context: Context) {
     /** Best-effort: open the data folder in the system Files app. */
     fun openFolder(context: Context) {
         val sub = projectName?.let { "/$it" } ?: ""
-        val docId = if (useMediaStore) "primary:Documents/ChronoData$sub"
-        else "primary:Android/data/${context.packageName}/files/ChronoData$sub"
+        val docId = if (useMediaStore) "primary:Documents/$rootDir$sub"
+        else "primary:Android/data/${context.packageName}/files/$rootDir$sub"
         val uri = DocumentsContract.buildDocumentUri(
             "com.android.externalstorage.documents", docId
         )

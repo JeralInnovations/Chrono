@@ -16,20 +16,22 @@ import java.util.Locale
  */
 object Exporter {
 
-    fun export(context: Context, results: List<TestResult>) {
+    fun export(context: Context, results: List<TestResult>, simulated: Boolean = false) {
         val dir = File(context.filesDir, "exports").apply { mkdirs() }
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val tag = if (simulated) "SIM_" else ""
 
-        val csv = File(dir, "chrono_results_$stamp.csv")
+        val csv = File(dir, "chrono_results_$tag$stamp.csv")
         csv.writeText(buildString {
             appendLine(
-                "label,tool,target,target_dist_value,target_dist_unit,result,source,date_iso," +
+                "simulated,label,tool,target,target_dist_value,target_dist_unit,result,source,date_iso," +
                     "split_ns,split_ms,distance_m,velocity_mps,velocity_fps"
             )
             for (r in results) {
                 val date = r.epochMillis?.let { Instant.ofEpochMilli(it).toString() } ?: ""
                 appendLine(
-                    esc(r.label) + "," + esc(r.tool) + "," + esc(r.target) + "," +
+                    simulated.toString() + "," +
+                        esc(r.label) + "," + esc(r.tool) + "," + esc(r.target) + "," +
                         (r.targetDistValue?.toString() ?: "") + "," + r.targetDistUnit + "," +
                         esc(r.outcome) + "," + (if (r.isManual) "manual" else "device") + "," +
                         date + "," + r.splitNs + "," +
@@ -42,9 +44,9 @@ object Exporter {
         })
 
         val uris = arrayListOf(uriFor(context, csv))
-        val cal = File(context.filesDir, "cal_history.jsonl")
+        val cal = File(context.filesDir, if (simulated) "cal_history_sim.jsonl" else "cal_history.jsonl")
         if (cal.exists()) {
-            val calCopy = File(dir, "chrono_cal_$stamp.jsonl")
+            val calCopy = File(dir, "chrono_cal_$tag$stamp.jsonl")
             cal.copyTo(calCopy, overwrite = true)
             uris.add(uriFor(context, calCopy))
         }

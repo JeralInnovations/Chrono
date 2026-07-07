@@ -74,8 +74,10 @@ enum class DistanceUnit(val label: String, val toMeters: Double) {
 }
 
 /** Dead-simple JSON file persistence — no database needed for a results log. */
-class ResultStore(context: Context) {
-    private val file = File(context.filesDir, "results.json")
+class ResultStore(context: Context, simulation: Boolean = false) {
+    // Simulated runs persist to their own file so demo data never mixes with
+    // real results.
+    private val file = File(context.filesDir, if (simulation) "results_sim.json" else "results.json")
 
     fun load(): List<TestResult> {
         if (!file.exists()) return emptyList()

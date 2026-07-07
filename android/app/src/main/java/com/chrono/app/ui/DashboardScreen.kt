@@ -255,7 +255,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                         Spacer(Modifier.size(6.dp))
                         Text("Files", color = TextDim, style = MaterialTheme.typography.bodyMedium)
                     }
-                    TextButton(onClick = { Exporter.export(context, vm.results.toList()) }) {
+                    TextButton(onClick = { Exporter.export(context, vm.results.toList(), vm.isSimulation) }) {
                         Icon(
                             Icons.Filled.Share, null,
                             tint = TextDim, modifier = Modifier.size(15.dp),
