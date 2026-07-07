@@ -51,10 +51,6 @@ const uint8_t PPI_S1     = 0;
 const uint8_t PPI_S2     = 1;
 const uint8_t PPI_GRP_S1 = 0;
 const uint8_t PPI_GRP_S2 = 1;
-const uint8_t GPIOTE_C1  = 2;   // task-mode channels driving the charge pins
-const uint8_t GPIOTE_C2  = 3;
-const uint8_t PPI_LAUNCH = 2;   // TIMER2 compare -> charge-pin SET (cal launch)
-
 const uint32_t TIMER_HZ = 16000000UL;   // TIMER2 @ 16 MHz, PRESCALER 0
 
 // ------------------------------------------------------------ protocol
@@ -263,7 +259,6 @@ void disarmTiming() {
 const uint8_t  CAL_SAMPLES       = 64;
 const uint32_t CAL_DISCHARGE_US  = 1000;            // ~5 tau for a 200 nF piezo via 1k
 const uint32_t CAL_TIMEOUT_TICKS = 16UL * 20000UL;  // 20 ms per sample
-const uint32_t CAL_LAUNCH_MARGIN = 1600;            // launch 100 us after scheduling
 
 static uint32_t isqrt64(uint64_t v) {
   uint64_t r = 0, bit = 1ULL << 62;
@@ -280,23 +275,17 @@ void runCalibration(uint8_t channel) {
   uint32_t sensPin = g_ADigitalPinMap[(channel == 1) ? SENSOR1_PIN : SENSOR2_PIN];
   uint32_t chgPin  = g_ADigitalPinMap[(channel == 1) ? CHARGE1_PIN : CHARGE2_PIN];
   uint8_t  evCh    = (channel == 1) ? GPIOTE_S1 : GPIOTE_S2;
-  uint8_t  taskCh  = (channel == 1) ? GPIOTE_C1 : GPIOTE_C2;
   uint8_t  grp     = (channel == 1) ? PPI_GRP_S1 : PPI_GRP_S2;
   uint8_t  ccIdx   = (channel == 1) ? 0 : 1;
 
   requestHfxo();   // absolute nanoseconds matter here: run off the crystal
 
-  // Charge pin under GPIOTE task control, output LOW.
-  NRF_GPIOTE->CONFIG[taskCh] =
-      (GPIOTE_CONFIG_MODE_Task       << GPIOTE_CONFIG_MODE_Pos)     |
-      (chgPin                        << GPIOTE_CONFIG_PSEL_Pos)     |
-      (GPIOTE_CONFIG_POLARITY_Toggle << GPIOTE_CONFIG_POLARITY_Pos) |
-      (GPIOTE_CONFIG_OUTINIT_Low     << GPIOTE_CONFIG_OUTINIT_Pos);
-
-  // Hardware launch: TIMER2 compare-3 event -> charge-pin SET task.
-  NRF_PPI->CH[PPI_LAUNCH].EEP = (uint32_t)&NRF_TIMER2->EVENTS_COMPARE[3];
-  NRF_PPI->CH[PPI_LAUNCH].TEP = (uint32_t)&NRF_GPIOTE->TASKS_SET[taskCh];
-  NRF_PPI->FORK[PPI_LAUNCH].TEP = 0;
+  // Charge pin drives the node through 10k only during calibration. The
+  // previous PPI/GPIOTE-task launch was elegant but brittle across board cores;
+  // a direct GPIO step is plenty stable for setup calibration and much easier
+  // to verify electrically.
+  nrf_gpio_cfg_output(chgPin);
+  nrf_gpio_pin_clear(chgPin);
 
   static uint32_t ticksBuf[CAL_SAMPLES];
   uint8_t valid = 0;
@@ -305,7 +294,7 @@ void runCalibration(uint8_t channel) {
   for (uint8_t i = 0; i <= CAL_SAMPLES; i++) {   // one extra: first sweep discarded
     // Discharge the node completely (sensor pin drives it low directly;
     // the charge pin pulls low through the 10k as well).
-    NRF_GPIOTE->TASKS_CLR[taskCh] = 1;
+    nrf_gpio_pin_clear(chgPin);
     nrf_gpio_cfg(sensPin, NRF_GPIO_PIN_DIR_OUTPUT, NRF_GPIO_PIN_INPUT_CONNECT,
                  NRF_GPIO_PIN_NOPULL, NRF_GPIO_PIN_S0S1, NRF_GPIO_PIN_NOSENSE);
     nrf_gpio_pin_clear(sensPin);
@@ -320,12 +309,9 @@ void runCalibration(uint8_t channel) {
     (void)NRF_GPIOTE->EVENTS_IN[evCh];
     NRF_PPI->TASKS_CHG[grp].EN = 1;              // arm the threshold capture
 
-    // Schedule the launch a fixed margin ahead, then let hardware take over.
-    NRF_TIMER2->EVENTS_COMPARE[3] = 0;
     NRF_TIMER2->TASKS_CAPTURE[2] = 1;
-    uint32_t t0 = NRF_TIMER2->CC[2] + CAL_LAUNCH_MARGIN;
-    NRF_TIMER2->CC[3] = t0;
-    NRF_PPI->CHENSET = (1UL << PPI_LAUNCH);
+    uint32_t t0 = NRF_TIMER2->CC[2];
+    nrf_gpio_pin_set(chgPin);
 
     bool got = false;
     while (true) {
@@ -334,7 +320,7 @@ void runCalibration(uint8_t channel) {
       if ((uint32_t)(NRF_TIMER2->CC[2] - t0) > CAL_TIMEOUT_TICKS) break;
     }
 
-    NRF_PPI->CHENCLR = (1UL << PPI_LAUNCH);
+    nrf_gpio_pin_clear(chgPin);
     NRF_PPI->TASKS_CHG[grp].DIS = 1;
     NRF_GPIOTE->EVENTS_IN[evCh] = 0;
 
@@ -344,8 +330,7 @@ void runCalibration(uint8_t channel) {
   }
 
   // Restore live-fire pin configuration.
-  NRF_GPIOTE->TASKS_CLR[taskCh] = 1;
-  NRF_GPIOTE->CONFIG[taskCh] = 0;                // release charge pin from GPIOTE
+  nrf_gpio_pin_clear(chgPin);
   nrf_gpio_cfg_default(chgPin);                  // back to true hi-Z
   nrf_gpio_cfg_input(sensPin, NRF_GPIO_PIN_PULLDOWN);
   if (!armed) releaseHfxo();
