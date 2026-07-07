@@ -315,7 +315,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                 ResultCard(
                     r,
                     latest = r == vm.results.firstOrNull(),
-                    ciPercent = vm.ciPercentFor(r),
+                    accuracyEnvelopePercent = vm.accuracyEnvelopePercentFor(r),
                     coverFor = { vm.photosFor(r) },
                     onEdit = { editing = r },
                     onOpenPhoto = { fullscreenPhoto = it to r.uid },
@@ -473,8 +473,11 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
             showDelete = false,
             showRecordedValues = true,
             onDismiss = { vm.finishResultPrompt() },
-            onSave = { label, tool, target, tdVal, tdUnit, outcome, epochMillis ->
-                vm.updateResult(r.uid, label, tool, target, tdVal, tdUnit, outcome, epochMillis)
+            onSave = { label, tool, target, tdVal, tdUnit, loading, projectile, passFail, notes, epochMillis ->
+                vm.updateResult(
+                    r.uid, label, tool, loading, projectile, target, tdVal, tdUnit,
+                    passFail, notes, epochMillis,
+                )
                 vm.finishResultPrompt()
             },
             onAttachPhotos = { uris -> vm.attachPhotosToResult(r.uid, uris) },
@@ -489,8 +492,11 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
         EditResultDialog(
             result = r,
             onDismiss = { editing = null },
-            onSave = { label, tool, target, tdVal, tdUnit, outcome, epochMillis ->
-                vm.updateResult(r.uid, label, tool, target, tdVal, tdUnit, outcome, epochMillis)
+            onSave = { label, tool, target, tdVal, tdUnit, loading, projectile, passFail, notes, epochMillis ->
+                vm.updateResult(
+                    r.uid, label, tool, loading, projectile, target, tdVal, tdUnit,
+                    passFail, notes, epochMillis,
+                )
                 editing = null
             },
             onAttachPhotos = { uris -> vm.attachPhotosToResult(r.uid, uris) },
@@ -556,9 +562,10 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
         ManualEntryDialog(
             vm = vm,
             onDismiss = { manualEntry = false },
-            onSave = { label, tool, target, tdVal, tdUnit, outcome, vel, velFps, epoch, photos ->
+            onSave = { label, tool, target, tdVal, tdUnit, loading, projectile, passFail, notes, vel, velFps, epoch, photos ->
                 vm.addManualEntry(
-                    label, tool, target, tdVal, tdUnit, outcome, vel, velFps, epoch, photos,
+                    label, tool, loading, projectile, target, tdVal, tdUnit,
+                    passFail, notes, vel, velFps, epoch, photos,
                 )
                 manualEntry = false
             },
@@ -580,7 +587,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                                 "placement, spacing, tool. Saved to this shot's folder."
                         else
                             "Photograph the target and anything notable about the " +
-                                "outcome. Saved with this shot's log.",
+                            "result notes. Saved with this shot's log.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     if (savedCount > 0) {
@@ -777,7 +784,7 @@ private fun FullLogDialog(
                         ResultCard(
                             r = r,
                             latest = r == vm.results.firstOrNull(),
-                            ciPercent = vm.ciPercentFor(r),
+                            accuracyEnvelopePercent = vm.accuracyEnvelopePercentFor(r),
                             coverFor = { vm.photosFor(r) },
                             onEdit = { onEdit(r) },
                             onOpenPhoto = { onOpenPhoto(it, r.uid) },
@@ -913,9 +920,9 @@ private fun RigCard(vm: ChronoViewModel, enabled: Boolean) {
                         style = MaterialTheme.typography.labelSmall,
                         color = TextDim,
                     )
-                    vm.estimatedCiAtCurrentSpacing()?.let { ci ->
+                    vm.estimatedAccuracyEnvelopeAtCurrentSpacing()?.let { ci ->
                         Text(
-                            "≈ ±%.1f%% CI here".format(ci),
+                            "about +/- %.1f%% GAE here".format(ci),
                             style = MaterialTheme.typography.labelSmall,
                             color = if (ci > 2.0) Amber else TextDim,
                         )
@@ -1109,8 +1116,28 @@ private fun NextTestCard(vm: ChronoViewModel, armed: Boolean) {
                 value = vm.pendingTool,
                 onValueChange = { vm.pendingTool = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Tool") },
+                label = { Text("Disruptor Type/Model") },
                 placeholder = { Text("PAN BK40, Hydrajet C2, etc.", color = TextDim) },
+                textStyle = fieldText,
+                singleLine = true,
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = vm.pendingDisruptorLoading,
+                onValueChange = { vm.pendingDisruptorLoading = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Disruptor loading") },
+                placeholder = { Text("charge/load configuration", color = TextDim) },
+                textStyle = fieldText,
+                singleLine = true,
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = vm.pendingProjectileType,
+                onValueChange = { vm.pendingProjectileType = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Projectile Type") },
+                placeholder = { Text("Water", color = TextDim) },
                 textStyle = fieldText,
                 singleLine = true,
             )
@@ -1129,7 +1156,7 @@ private fun NextTestCard(vm: ChronoViewModel, armed: Boolean) {
                 value = vm.pendingTargetDistVal,
                 onValueChange = { vm.pendingTargetDistVal = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Distance to target") },
+                label = { Text("Stand-Off Distance") },
                 placeholder = { Text("25", color = TextDim) },
                 textStyle = fieldText,
                 singleLine = true,
@@ -1252,7 +1279,7 @@ private fun ArmButton(
 private fun ResultCard(
     r: TestResult,
     latest: Boolean,
-    ciPercent: Double,
+    accuracyEnvelopePercent: Double,
     coverFor: () -> List<android.net.Uri>,
     onEdit: () -> Unit,
     onOpenPhoto: (android.net.Uri) -> Unit,
@@ -1298,13 +1325,14 @@ private fun ResultCard(
                     Text("ft/s", color = TextDim, modifier = Modifier.padding(bottom = 5.dp))
                 }
                 Spacer(Modifier.height(4.dp))
-                val ciText = if (ciPercent >= 0.05) "±%.1f%% CI".format(ciPercent) else "±<0.1% CI"
+                val envelopeText = if (accuracyEnvelopePercent >= 0.05)
+                    "+/- %.1f%% GAE".format(accuracyEnvelopePercent) else "+/- <0.1% GAE"
                 val detail = when {
                     r.isManual && r.metersPerSecond > 0 ->
                         "%.2f m/s  ·  manual entry".format(r.metersPerSecond)
                     r.isManual -> "manual entry"
                     else -> "%.2f m/s  -  %s  -  %s".format(
-                        r.metersPerSecond, r.splitTimeText(), ciText
+                        r.metersPerSecond, r.splitTimeText(), envelopeText
                     )
                 }
                 Text(
@@ -1313,7 +1341,9 @@ private fun ResultCard(
                     color = if (r.isManual) Teal else TextDim,
                 )
                 val meta = listOfNotNull(
-                    r.tool.takeIf { it.isNotBlank() }?.let { "Tool: $it" },
+                    r.tool.takeIf { it.isNotBlank() }?.let { "Disruptor: $it" },
+                    r.disruptorLoading.takeIf { it.isNotBlank() }?.let { "Loading: $it" },
+                    r.projectileType.ifBlank { "Water" }.let { "Projectile: $it" },
                     r.target.takeIf { it.isNotBlank() }?.let { "Target: $it" },
                     r.targetDistanceText()?.let { "@ $it" },
                 ).joinToString("  ·  ")
@@ -1321,10 +1351,13 @@ private fun ResultCard(
                     Spacer(Modifier.height(6.dp))
                     Text(meta, style = MaterialTheme.typography.bodyMedium, color = TextDim)
                 }
-                if (r.outcome.isNotBlank()) {
+                if (r.passFail.isNotBlank() || r.specialNotes.isNotBlank() || r.outcome.isNotBlank()) {
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        "Result: ${r.outcome}",
+                        listOfNotNull(
+                            r.passFail.takeIf { it.isNotBlank() },
+                            r.specialNotes.ifBlank { r.outcome }.takeIf { it.isNotBlank() },
+                        ).joinToString(" - "),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
                     )
@@ -1444,6 +1477,26 @@ private fun ReadOnlyLogValue(label: String, value: String) {
 }
 
 @Composable
+private fun PassFailSelector(value: String, onChange: (String) -> Unit) {
+    Text("Pass/Fail", style = MaterialTheme.typography.labelSmall, color = TextDim)
+    Spacer(Modifier.height(6.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+        listOf("Pass", "Fail").forEach { option ->
+            val selected = value.equals(option, ignoreCase = true)
+            if (selected) {
+                Button(onClick = { onChange(option) }, modifier = Modifier.weight(1f)) {
+                    Text(option)
+                }
+            } else {
+                OutlinedButton(onClick = { onChange(option) }, modifier = Modifier.weight(1f)) {
+                    Text(option)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun EditResultDialog(
     result: TestResult,
     title: String = "Edit test",
@@ -1454,7 +1507,8 @@ private fun EditResultDialog(
     onSave: (
         label: String, tool: String, target: String,
         targetDistValue: Double?, targetDistUnit: String,
-        outcome: String, epochMillis: Long?,
+        disruptorLoading: String, projectileType: String,
+        passFail: String, specialNotes: String, epochMillis: Long?,
     ) -> Unit,
     onAttachPhotos: (List<android.net.Uri>) -> Unit,
     photosFor: () -> List<android.net.Uri>,
@@ -1475,10 +1529,13 @@ private fun EditResultDialog(
     }
     var label by remember { mutableStateOf(result.label) }
     var tool by remember { mutableStateOf(result.tool) }
+    var disruptorLoading by remember { mutableStateOf(result.disruptorLoading) }
+    var projectileType by remember { mutableStateOf(result.projectileType.ifBlank { "Water" }) }
     var target by remember { mutableStateOf(result.target) }
     var tdVal by remember { mutableStateOf(result.targetDistValue?.let { trimZeros(it) } ?: "") }
     var tdUnit by remember { mutableStateOf(result.targetDistUnit) }
-    var outcome by remember { mutableStateOf(result.outcome) }
+    var passFail by remember { mutableStateOf(result.passFail) }
+    var specialNotes by remember { mutableStateOf(result.specialNotes.ifBlank { result.outcome }) }
     var dateField by remember {
         mutableStateOf(
             TextFieldValue(
@@ -1526,8 +1583,28 @@ private fun EditResultDialog(
                 OutlinedTextField(
                     value = tool,
                     onValueChange = { tool = it },
-                    label = { Text("Tool") },
+                    label = { Text("Disruptor Type/Model") },
                     placeholder = { Text("PAN BK40, Hydrajet C2, etc.", color = TextDim) },
+                    textStyle = fieldText,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = disruptorLoading,
+                    onValueChange = { disruptorLoading = it },
+                    label = { Text("Disruptor loading") },
+                    placeholder = { Text("charge/load configuration", color = TextDim) },
+                    textStyle = fieldText,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = projectileType,
+                    onValueChange = { projectileType = it },
+                    label = { Text("Projectile Type") },
+                    placeholder = { Text("Water", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -1546,7 +1623,7 @@ private fun EditResultDialog(
                 OutlinedTextField(
                     value = tdVal,
                     onValueChange = { tdVal = it },
-                    label = { Text("Distance to target") },
+                    label = { Text("Stand-Off Distance") },
                     textStyle = fieldText,
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -1554,16 +1631,18 @@ private fun EditResultDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
+                PassFailSelector(passFail) { passFail = it }
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
-                    value = outcome,
-                    onValueChange = { outcome = it },
-                    label = { Text("Result") },
+                    value = specialNotes,
+                    onValueChange = { specialNotes = it },
+                    label = { Text("Special Notes") },
                     placeholder = { Text("penetration, depth, dent etc.", color = TextDim) },
                     textStyle = fieldText,
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(
-                            if (showRecordedValues && outcome.isBlank()) Amber.copy(alpha = 0.14f)
+                            if (showRecordedValues && specialNotes.isBlank()) Amber.copy(alpha = 0.14f)
                             else Color.Transparent,
                             RoundedCornerShape(8.dp),
                         ),
@@ -1624,7 +1703,8 @@ private fun EditResultDialog(
                     onSave(
                         label.trim(), tool.trim(), target.trim(),
                         tdVal.replace(',', '.').toDoubleOrNull(), tdUnit,
-                        outcome.trim(), parsedDate,
+                        disruptorLoading.trim(), projectileType.trim().ifBlank { "Water" },
+                        passFail.trim(), specialNotes.trim(), parsedDate,
                     )
                 },
                 enabled = !dateError,
@@ -1642,7 +1722,9 @@ private fun ManualEntryDialog(
     onDismiss: () -> Unit,
     onSave: (
         label: String, tool: String, target: String,
-        targetDistValue: Double?, targetDistUnit: String, outcome: String,
+        targetDistValue: Double?, targetDistUnit: String,
+        disruptorLoading: String, projectileType: String,
+        passFail: String, specialNotes: String,
         velocity: Double?, velocityIsFps: Boolean, epochMillis: Long?,
         photos: List<android.net.Uri>,
     ) -> Unit,
@@ -1653,10 +1735,13 @@ private fun ManualEntryDialog(
     ) { uris -> pickedPhotos = pickedPhotos + uris }
     var label by remember { mutableStateOf(vm.pendingLabel) }
     var tool by remember { mutableStateOf(vm.pendingTool) }
+    var disruptorLoading by remember { mutableStateOf(vm.pendingDisruptorLoading) }
+    var projectileType by remember { mutableStateOf(vm.pendingProjectileType.ifBlank { "Water" }) }
     var target by remember { mutableStateOf(vm.pendingTarget) }
     var tdVal by remember { mutableStateOf(vm.pendingTargetDistVal) }
     var tdUnit by remember { mutableStateOf(vm.pendingTargetDistUnit) }
-    var outcome by remember { mutableStateOf("") }
+    var passFail by remember { mutableStateOf("") }
+    var specialNotes by remember { mutableStateOf("") }
     var velText by remember { mutableStateOf("") }
     var velIsFps by remember { mutableStateOf(true) }
     var velUnitOpen by remember { mutableStateOf(false) }
@@ -1723,8 +1808,28 @@ private fun ManualEntryDialog(
                 OutlinedTextField(
                     value = tool,
                     onValueChange = { tool = it },
-                    label = { Text("Tool") },
+                    label = { Text("Disruptor Type/Model") },
                     placeholder = { Text("PAN BK40, Hydrajet C2, etc.", color = TextDim) },
+                    textStyle = fieldText,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = disruptorLoading,
+                    onValueChange = { disruptorLoading = it },
+                    label = { Text("Disruptor loading") },
+                    placeholder = { Text("charge/load configuration", color = TextDim) },
+                    textStyle = fieldText,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = projectileType,
+                    onValueChange = { projectileType = it },
+                    label = { Text("Projectile Type") },
+                    placeholder = { Text("Water", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -1743,7 +1848,7 @@ private fun ManualEntryDialog(
                 OutlinedTextField(
                     value = tdVal,
                     onValueChange = { tdVal = it },
-                    label = { Text("Distance to target") },
+                    label = { Text("Stand-Off Distance") },
                     textStyle = fieldText,
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -1751,10 +1856,12 @@ private fun ManualEntryDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
+                PassFailSelector(passFail) { passFail = it }
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
-                    value = outcome,
-                    onValueChange = { outcome = it },
-                    label = { Text("Result") },
+                    value = specialNotes,
+                    onValueChange = { specialNotes = it },
+                    label = { Text("Special Notes") },
                     placeholder = { Text("penetration, depth, dent etc.", color = TextDim) },
                     textStyle = fieldText,
                     modifier = Modifier.fillMaxWidth(),
@@ -1783,7 +1890,9 @@ private fun ManualEntryDialog(
                 onClick = {
                     onSave(
                         label.trim(), tool.trim(), target.trim(),
-                        tdVal.replace(',', '.').toDoubleOrNull(), tdUnit, outcome.trim(),
+                        tdVal.replace(',', '.').toDoubleOrNull(), tdUnit,
+                        disruptorLoading.trim(), projectileType.trim().ifBlank { "Water" },
+                        passFail.trim(), specialNotes.trim(),
                         velText.replace(',', '.').toDoubleOrNull(), velIsFps, parsedDate,
                         pickedPhotos,
                     )

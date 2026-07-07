@@ -62,10 +62,12 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     val results = mutableStateListOf<TestResult>()
 
     /** Details applied to the next test; all editable on the result afterwards.
-     *  Tool/target fields persist across sessions (they rarely change mid-range-day). */
+     *  Shot setup fields persist across sessions (they rarely change mid-range-day). */
     // Auto-fills Test1, Test2, … per project; the user can override it.
     var pendingLabel by mutableStateOf(session.suggestedLabel())
     var pendingTool by mutableStateOf(prefs.getString("pendTool", "") ?: "")
+    var pendingDisruptorLoading by mutableStateOf(prefs.getString("pendLoading", "") ?: "")
+    var pendingProjectileType by mutableStateOf(prefs.getString("pendProjectile", "Water") ?: "Water")
     var pendingTarget by mutableStateOf(prefs.getString("pendTarget", "") ?: "")
     var pendingTargetDistVal by mutableStateOf(prefs.getString("pendTdVal", "") ?: "")
     var pendingTargetDistUnit by mutableStateOf(prefs.getString("pendTdUnit", "in") ?: "in")
@@ -310,6 +312,8 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
                 label = pendingLabel.trim(),
                 epochMillis = if (r.epochSec > 0) r.epochSec * 1000L else null,
                 tool = pendingTool.trim(),
+                disruptorLoading = pendingDisruptorLoading.trim(),
+                projectileType = pendingProjectileType.trim().ifBlank { "Water" },
                 target = pendingTarget.trim(),
                 targetDistValue = pendingTargetDistVal.replace(',', '.').toDoubleOrNull(),
                 targetDistUnit = pendingTargetDistUnit,
@@ -321,6 +325,8 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
             persist()
             prefs.edit()
                 .putString("pendTool", pendingTool)
+                .putString("pendLoading", pendingDisruptorLoading)
+                .putString("pendProjectile", pendingProjectileType.ifBlank { "Water" })
                 .putString("pendTarget", pendingTarget)
                 .putString("pendTdVal", pendingTargetDistVal)
                 .putString("pendTdUnit", pendingTargetDistUnit)
@@ -340,10 +346,13 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         uid: String,
         label: String,
         tool: String,
+        disruptorLoading: String,
+        projectileType: String,
         target: String,
         targetDistValue: Double?,
         targetDistUnit: String,
-        outcome: String,
+        passFail: String,
+        specialNotes: String,
         epochMillis: Long?,
     ) {
         val idx = results.indexOfFirst { it.uid == uid }
@@ -352,10 +361,14 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         results[idx] = r.copy(
             label = label,
             tool = tool,
+            disruptorLoading = disruptorLoading,
+            projectileType = projectileType.ifBlank { "Water" },
             target = target,
             targetDistValue = targetDistValue,
             targetDistUnit = targetDistUnit,
-            outcome = outcome,
+            passFail = passFail,
+            specialNotes = specialNotes,
+            outcome = specialNotes,
             epochMillis = epochMillis ?: r.epochMillis,
         )
         persist()
@@ -365,10 +378,13 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     fun addManualEntry(
         label: String,
         tool: String,
+        disruptorLoading: String,
+        projectileType: String,
         target: String,
         targetDistValue: Double?,
         targetDistUnit: String,
-        outcome: String,
+        passFail: String,
+        specialNotes: String,
         velocity: Double?,
         velocityIsFps: Boolean,
         epochMillis: Long?,
@@ -383,10 +399,14 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
             label = label.trim(),
             epochMillis = epochMillis,
             tool = tool.trim(),
+            disruptorLoading = disruptorLoading.trim(),
+            projectileType = projectileType.trim().ifBlank { "Water" },
             target = target.trim(),
             targetDistValue = targetDistValue,
             targetDistUnit = targetDistUnit,
-            outcome = outcome.trim(),
+            passFail = passFail.trim(),
+            specialNotes = specialNotes.trim(),
+            outcome = specialNotes.trim(),
             manualVelocityMps = mps,
         )
         rec.shotFolder = session.logShot(rec.label, shotJson(rec))
@@ -447,14 +467,20 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         .put("source", if (r.isManual) "manual" else "device")
         .put("label", r.label)
         .put("tool", r.tool)
+        .put("disruptorTypeModel", r.tool)
+        .put("disruptorLoading", r.disruptorLoading)
+        .put("projectileType", r.projectileType.ifBlank { "Water" })
         .put("target", r.target)
         .put("targetDistUnit", r.targetDistUnit)
-        .put("outcome", r.outcome)
+        .put("passFail", r.passFail)
+        .put("specialNotes", r.specialNotes.ifBlank { r.outcome })
+        .put("outcome", r.specialNotes.ifBlank { r.outcome })
         .put("splitNs", r.splitNs)
         .put("distanceM", r.distanceM)
         .put("velocityMps", r.metersPerSecond)
         .put("velocityFps", r.feetPerSecond)
-        .put("ciPercent", ciPercentFor(r))
+        .put("accuracyEnvelopePercent", accuracyEnvelopePercentFor(r))
+        .put("ciPercent", accuracyEnvelopePercentFor(r))
         .put("deviceSerial", r.deviceSerial)
         .put("epochMillis", r.epochMillis ?: -1L)
         .apply { r.targetDistValue?.let { put("targetDistValue", it) } }
@@ -614,37 +640,59 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * ~95% confidence interval for one result, as a percent of the velocity.
-     * Combines what the hardware reports about itself (timer tick, crystal
-     * ppm, per-edge front-end jitter) with this rig's measured channel
-     * mismatch (scaled from the 10k calibration stimulus down to the ~1k
-     * live source impedance) and a 0.5 mm assumption on the user's
-     * gate-spacing measurement. Newer hardware that reports tighter numbers
-     * automatically tightens this — no app change needed.
+     * Conservative accuracy envelope for one result, as a percent of velocity.
+     * Combines hardware timer uncertainty, clock drift, edge jitter, measured
+     * channel balance, loaded-calibration repeatability, and the user's gate
+     * spacing uncertainty. Newer hardware and better calibration automatically
+     * tighten this without changing the app.
      */
-    fun ciPercentFor(r: TestResult): Double {
+    fun accuracyEnvelopePercentFor(r: TestResult): Double {
         if (r.isManual || r.splitNs <= 0 || r.distanceM <= 0) return 0.0
-        return ciPercentRaw(r.splitNs.toDouble(), r.distanceM)
+        return accuracyEnvelopePercentRaw(r.splitNs.toDouble(), r.distanceM)
     }
 
-    /** Expected CI at the current gate spacing for a reference velocity —
-     *  shows directly how much a short spacing costs in confidence. */
-    fun estimatedCiAtCurrentSpacing(fps: Double = 3000.0): Double? {
+    fun ciPercentFor(r: TestResult): Double = accuracyEnvelopePercentFor(r)
+
+    /** Expected envelope at the current gate spacing for a reference velocity. */
+    fun estimatedAccuracyEnvelopeAtCurrentSpacing(fps: Double = 3000.0): Double? {
         if (distanceM <= 0) return null
         val splitNs = distanceM / (fps / 3.28084) * 1e9
-        return ciPercentRaw(splitNs, distanceM)
+        return accuracyEnvelopePercentRaw(splitNs, distanceM)
     }
 
-    private fun ciPercentRaw(splitNs: Double, gateM: Double): Double {
+    fun estimatedCiAtCurrentSpacing(fps: Double = 3000.0): Double? =
+        estimatedAccuracyEnvelopeAtCurrentSpacing(fps)
+
+    private fun accuracyEnvelopePercentRaw(splitNs: Double, gateM: Double): Double {
         val hw = ble.hwInfo.value ?: HwInfo.DEFAULT
-        val tickNs = hw.tickPs / 1000.0
+        val tickNs = hw.tickPs / 1000.0 / sqrt(12.0)
         val jitterNs = hw.edgeJitterNs * sqrt(2.0)             // two independent edges
         val clockNs = splitNs * hw.clockPpm / 1_000_000.0
-        val residualNs = (channelMismatchNs() ?: 200L) / 10.0  // cal->live impedance scale
-        val sigmaT = sqrt(jitterNs * jitterNs + tickNs * tickNs + clockNs * clockNs) + residualNs
+        val frontEndNs = calibrationFrontEndNs()
+        val sigmaT = sqrt(
+            tickNs.pow(2.0) + jitterNs.pow(2.0) + clockNs.pow(2.0) + frontEndNs.pow(2.0)
+        )
         val sigmaD = 0.0005                                    // 0.5 mm spacing uncertainty
         val rel = sqrt((sigmaT / splitNs).pow(2.0) + (sigmaD / gateM).pow(2.0))
-        return 2 * rel * 100
+        return 2.58 * rel * 100.0
+    }
+
+    private fun calibrationFrontEndNs(): Double {
+        val mismatch = channelMismatchNs()
+        val mismatchNs = when {
+            mismatch == null -> 300.0
+            mismatch <= 250L -> 75.0
+            mismatch <= 600L -> 125.0
+            mismatch <= 1500L -> 220.0
+            else -> (mismatch * 0.30).coerceIn(300.0, 800.0)
+        }
+        val repeatabilityNs = listOfNotNull(calData["l1"], calData["l2"])
+            .filter { it.isUsable }
+            .map { it.stddevNs.toDouble() }
+            .maxOrNull()
+            ?.coerceIn(25.0, 250.0)
+            ?: 120.0
+        return sqrt(mismatchNs.pow(2.0) + repeatabilityNs.pow(2.0))
     }
 
     // ---------------------------------------------------------- setup flow

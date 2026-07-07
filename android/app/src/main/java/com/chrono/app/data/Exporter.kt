@@ -24,7 +24,8 @@ object Exporter {
         val csv = File(dir, "chrono_results_$tag$stamp.csv")
         csv.writeText(buildString {
             appendLine(
-                "simulated,label,tool,target,target_dist_value,target_dist_unit,result,source,date_iso," +
+                "simulated,label,disruptor_type_model,target,standoff_value,standoff_unit," +
+                    "disruptor_loading,projectile_type,pass_fail,special_notes,source,date_iso," +
                     "mcu_serial,split_time,split_ns,split_ms,distance_m,velocity_mps,velocity_fps"
             )
             for (r in results) {
@@ -33,7 +34,9 @@ object Exporter {
                     simulated.toString() + "," +
                         esc(r.label) + "," + esc(r.tool) + "," + esc(r.target) + "," +
                         (r.targetDistValue?.toString() ?: "") + "," + r.targetDistUnit + "," +
-                        esc(r.outcome) + "," + (if (r.isManual) "manual" else "device") + "," +
+                        esc(r.disruptorLoading) + "," + esc(r.projectileType.ifBlank { "Water" }) + "," +
+                        esc(r.passFail) + "," + esc(r.specialNotes.ifBlank { r.outcome }) + "," +
+                        (if (r.isManual) "manual" else "device") + "," +
                         date + "," + esc(r.deviceSerial) + "," + esc(r.splitTimeText()) + "," + r.splitNs + "," +
                         String.format(Locale.US, "%.6f", r.splitMillis) + "," +
                         String.format(Locale.US, "%.5f", r.distanceM) + "," +

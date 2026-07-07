@@ -20,11 +20,15 @@ data class TestResult(
     /** null = device had no synced clock at the time of the shot */
     var epochMillis: Long?,
     var tool: String = "",
+    var disruptorLoading: String = "",
+    var projectileType: String = "Water",
     /** distance to target kept as value+unit so it can be converted later */
     var targetDistValue: Double? = null,
     var targetDistUnit: String = "in",
     var target: String = "",
-    /** the "Result" blank — outcome notes, filled in after the shot */
+    var passFail: String = "",
+    var specialNotes: String = "",
+    /** legacy outcome notes; new logs use specialNotes */
     var outcome: String = "",
     /** set on manual entries (deviceResultId < 0) that were typed in, not measured */
     var manualVelocityMps: Double? = null,
@@ -107,6 +111,7 @@ class ResultStore(context: Context, simulation: Boolean = false) {
             val arr = JSONArray(file.readText())
             (0 until arr.length()).map { i ->
                 val o = arr.getJSONObject(i)
+                val legacyOutcome = o.optString("outcome", "")
                 TestResult(
                     uid = o.getString("uid"),
                     deviceResultId = o.getInt("deviceResultId"),
@@ -115,13 +120,17 @@ class ResultStore(context: Context, simulation: Boolean = false) {
                     label = o.optString("label", ""),
                     epochMillis = o.optLong("epochMillis", -1L).takeIf { it > 0 },
                     tool = o.optString("tool", ""),
+                    disruptorLoading = o.optString("disruptorLoading", ""),
+                    projectileType = o.optString("projectileType", "Water").ifBlank { "Water" },
                     targetDistValue = o.optDouble("targetDistValue").takeIf { !it.isNaN() }
                         ?: legacyDistValue(o.optString("targetDistance", "")),
                     targetDistUnit = o.optString("targetDistUnit").ifBlank {
                         legacyDistUnit(o.optString("targetDistance", ""))
                     },
                     target = o.optString("target", ""),
-                    outcome = o.optString("outcome", ""),
+                    passFail = o.optString("passFail", ""),
+                    specialNotes = o.optString("specialNotes", legacyOutcome),
+                    outcome = legacyOutcome,
                     manualVelocityMps = o.optDouble("manualVelocityMps").takeIf { !it.isNaN() },
                     deviceSerial = o.optString("deviceSerial", ""),
                     shotFolder = o.optString("shotFolder", ""),
@@ -143,9 +152,13 @@ class ResultStore(context: Context, simulation: Boolean = false) {
                     .put("label", r.label)
                     .put("epochMillis", r.epochMillis ?: -1L)
                     .put("tool", r.tool)
+                    .put("disruptorLoading", r.disruptorLoading)
+                    .put("projectileType", r.projectileType.ifBlank { "Water" })
                     .put("targetDistUnit", r.targetDistUnit)
                     .put("target", r.target)
-                    .put("outcome", r.outcome)
+                    .put("passFail", r.passFail)
+                    .put("specialNotes", r.specialNotes)
+                    .put("outcome", r.specialNotes.ifBlank { r.outcome })
                     .put("deviceSerial", r.deviceSerial)
                     .put("shotFolder", r.shotFolder)
                     .put("thumbnailUri", r.thumbnailUri)
