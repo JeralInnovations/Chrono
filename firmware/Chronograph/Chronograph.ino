@@ -624,8 +624,12 @@ void loop() {
     }
   }
 
-  // LED: on while armed/running, off otherwise (active-LOW)
-  digitalWrite(LED_BUILTIN, (state == ST_ARMED || state == ST_RUNNING) ? LOW : HIGH);
+  // LED is active-LOW. Standby blinks 1s on / 1s off; timing stays solid on.
+  if (state == ST_ARMED) {
+    digitalWrite(LED_BUILTIN, ((millis() / 1000UL) % 2UL == 0UL) ? LOW : HIGH);
+  } else {
+    digitalWrite(LED_BUILTIN, (state == ST_RUNNING) ? LOW : HIGH);
+  }
 
   delay(2);
 }

@@ -1163,14 +1163,18 @@ private fun ArmButton(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(96.dp)
-                    .background(Teal.copy(alpha = 0.18f), RoundedCornerShape(20.dp)),
+                    .border(2.dp, Color(0xFFE00000), RoundedCornerShape(20.dp))
+                    .background(
+                        Color(0xFFE00000).copy(alpha = 0.18f + 0.20f * pulse),
+                        RoundedCornerShape(20.dp),
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    "TIMING…  shot in flight",
+                    "RECORDING - SHOT IN FLIGHT",
                     style = MaterialTheme.typography.titleMedium,
-                    color = Teal,
-                    modifier = Modifier.alpha(pulse),
+                    color = Color.White,
+                    textAlign = TextAlign.Center,
                 )
             }
         }
@@ -1180,21 +1184,25 @@ private fun ArmButton(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(96.dp)
-                        .background(Amber.copy(alpha = 0.16f), RoundedCornerShape(20.dp)),
+                        .border(2.dp, Color(0xFFE00000), RoundedCornerShape(20.dp))
+                        .background(
+                            Color(0xFFE00000).copy(alpha = 0.14f + 0.24f * pulse),
+                            RoundedCornerShape(20.dp),
+                        ),
                     contentAlignment = Alignment.Center,
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            "STANDBY — WAITING FOR SHOT",
+                            "STANDBY - WAITING FOR SHOT",
                             style = MaterialTheme.typography.titleMedium,
-                            color = Amber,
-                            modifier = Modifier.alpha(pulse),
+                            color = Color.White,
+                            textAlign = TextAlign.Center,
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(
                             "You can walk away; the result uploads when you're back in range.",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = TextDim,
+                            color = Color.White.copy(alpha = 0.78f),
                             textAlign = TextAlign.Center,
                         )
                     }
@@ -1219,7 +1227,7 @@ private fun ArmButton(
                         disabledContentColor = Color.White.copy(alpha = 0.55f),
                     ),
                 ) {
-                    Canvas(modifier = Modifier.size(14.dp).alpha(pulse)) {
+                    Canvas(modifier = Modifier.size(14.dp)) {
                         drawCircle(Color.White)
                     }
                     Spacer(Modifier.size(10.dp))
