@@ -115,6 +115,7 @@ class ChronoBle(private val context: Context) {
 
     private var gatt: BluetoothGatt? = null
     private var userDisconnected = false
+    private val prefs = context.getSharedPreferences("chrono_ble", Context.MODE_PRIVATE)
 
     private var chControl: BluetoothGattCharacteristic? = null
     private var chStatus: BluetoothGattCharacteristic? = null
@@ -155,9 +156,20 @@ class ChronoBle(private val context: Context) {
 
     fun connect(device: BluetoothDevice) {
         stopScan()
+        prefs.edit().putString("lastDeviceAddress", device.address).apply()
         userDisconnected = false
         connState.value = ConnState.CONNECTING
         gatt = device.connectGatt(context, false, gattCb, BluetoothDevice.TRANSPORT_LE)
+    }
+
+    fun reconnectLast(): Boolean {
+        val address = prefs.getString("lastDeviceAddress", null) ?: return false
+        val device = runCatching { adapter?.getRemoteDevice(address) }.getOrNull() ?: return false
+        stopScan()
+        userDisconnected = false
+        connState.value = ConnState.CONNECTING
+        gatt = device.connectGatt(context, true, gattCb, BluetoothDevice.TRANSPORT_LE)
+        return true
     }
 
     fun disconnect() {

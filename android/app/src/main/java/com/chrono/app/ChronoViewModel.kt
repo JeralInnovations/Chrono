@@ -243,11 +243,13 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
 
         // A camera capture can kill the process mid-session; restore that prompt.
         photoPrompt = prefs.getString("photoPrompt", null)
-        // Always launch to the mode-select menu (CONNECT). We deliberately do NOT
-        // auto-resume a previous sim/manual session — simulated data must never
-        // masquerade as a live run, and the user picks Standard vs Simulation on
-        // every power-up. A real device simply re-pairs from the scan list,
-        // restoring an in-progress session automatically once it reconnects.
+        if (photoPrompt != null && setupDone) {
+            screen = Screen.DASHBOARD
+            ble.reconnectLast()
+        }
+        // Normal launches still start at mode select. Photo capture is the one
+        // exception: the OS can recreate us after camera approval, so resume the
+        // dashboard prompt and try to reattach to the last selected BLE device.
     }
 
     // -------------------------------------------------------------- results
@@ -634,9 +636,6 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun arm() = ble.sendCommand(Proto.CMD_ARM)
-    fun recordOrPromptSetupPhotos() {
-        if (setupPhotosNeeded) promptPhotos("setup") else arm()
-    }
     fun disarm() = ble.sendCommand(Proto.CMD_DISARM)
     fun syncTime() = ble.syncTime()
 

@@ -164,6 +164,23 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Set up new test") }
             }
+            if (vm.setupPhotosNeeded && connState == ConnState.CONNECTED && !armed && !running) {
+                item {
+                    Button(
+                        onClick = { vm.requestSetupPhotos() },
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFE00000),
+                            contentColor = Color.White,
+                        ),
+                    ) {
+                        Icon(Icons.Filled.PhotoCamera, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.size(8.dp))
+                        Text("Add setup photos")
+                    }
+                }
+            }
         }
 
         if (vm.isSimulation) {
@@ -219,8 +236,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                     running = running,
                     connected = connState == ConnState.CONNECTED || connState == ConnState.RECONNECTING,
                     sensorsReady = vm.sensor1Ready && vm.sensor2Ready,
-                    setupPhotosNeeded = vm.setupPhotosNeeded,
-                    onArm = { vm.recordOrPromptSetupPhotos() },
+                    onArm = { vm.arm() },
                     onDisarm = { vm.disarm() },
                 )
             }
@@ -970,7 +986,6 @@ private fun ArmButton(
     running: Boolean,
     connected: Boolean,
     sensorsReady: Boolean,
-    setupPhotosNeeded: Boolean,
     onArm: () -> Unit,
     onDisarm: () -> Unit,
 ) {
@@ -1037,9 +1052,9 @@ private fun ArmButton(
                     modifier = Modifier.fillMaxWidth().height(64.dp),
                     shape = RoundedCornerShape(20.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Bad,
+                        containerColor = Color(0xFFE00000),
                         contentColor = Color.White,
-                        disabledContainerColor = Bad.copy(alpha = 0.28f),
+                        disabledContainerColor = Color(0xFFE00000).copy(alpha = 0.28f),
                         disabledContentColor = Color.White.copy(alpha = 0.55f),
                     ),
                 ) {
@@ -1048,15 +1063,6 @@ private fun ArmButton(
                     }
                     Spacer(Modifier.size(10.dp))
                     Text("RECORD", style = MaterialTheme.typography.labelLarge)
-                }
-                if (setupPhotosNeeded && connected && sensorsReady) {
-                    Text(
-                        "Tap Record to add setup photos before test standby.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Bad,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp).alpha(pulse),
-                    )
                 }
                 if (connected && !sensorsReady) {
                     Text(
