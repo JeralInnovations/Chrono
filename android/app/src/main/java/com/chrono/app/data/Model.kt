@@ -7,6 +7,7 @@ import java.io.File
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /** One recorded split. Stored locally in results.json. */
 data class TestResult(
@@ -40,6 +41,16 @@ data class TestResult(
             ?: if (splitNs > 0 && distanceM > 0) distanceM / splitSeconds else 0.0
     val feetPerSecond: Double get() = metersPerSecond * 3.28084
 
+    fun splitTimeText(): String {
+        if (splitNs <= 0) return "not recorded"
+        return when {
+            splitNs < 1_000L -> "${splitNs}ns"
+            splitNs < 1_000_000L -> formatWholeish(splitNs / 1_000.0, "us")
+            splitNs < 1_000_000_000L -> formatWholeish(splitNs / 1_000_000.0, "ms")
+            else -> formatWholeish(splitNs / 1_000_000_000.0, "s")
+        }
+    }
+
     fun targetDistanceText(): String? =
         targetDistValue?.let {
             val v = if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString()
@@ -52,6 +63,15 @@ data class TestResult(
             .withZone(ZoneId.systemDefault())
             .format(Instant.ofEpochMilli(ms))
     }
+}
+
+private fun formatWholeish(value: Double, unit: String): String {
+    val text = when {
+        value >= 100 -> String.format(Locale.US, "%.0f", value)
+        value >= 10 -> String.format(Locale.US, "%.1f", value)
+        else -> String.format(Locale.US, "%.2f", value)
+    }.trimEnd('0').trimEnd('.')
+    return "$text$unit"
 }
 
 /** Units offered for "distance to target" — value + unit are stored separately. */

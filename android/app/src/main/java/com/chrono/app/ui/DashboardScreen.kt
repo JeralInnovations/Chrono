@@ -447,7 +447,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                             Text("ft/s", color = TextDim, style = MaterialTheme.typography.bodyMedium)
                             Spacer(Modifier.size(12.dp))
                             Text(
-                                "%.3f ms".format(s.splitMillis),
+                                s.splitTimeText(),
                                 color = TextDim,
                                 style = MaterialTheme.typography.bodyMedium,
                             )
@@ -1302,8 +1302,8 @@ private fun ResultCard(
                     r.isManual && r.metersPerSecond > 0 ->
                         "%.2f m/s  ·  manual entry".format(r.metersPerSecond)
                     r.isManual -> "manual entry"
-                    else -> "%.2f m/s  ·  %.3f ms  ·  %s".format(
-                        r.metersPerSecond, r.splitMillis, ciText
+                    else -> "%.2f m/s  -  %s  -  %s".format(
+                        r.metersPerSecond, r.splitTimeText(), ciText
                     )
                 }
                 Text(
@@ -1506,7 +1506,7 @@ private fun EditResultDialog(
                         "%.1f ft/s".format(result.feetPerSecond) else "Not recorded"
                     ReadOnlyLogValue("Velocity", velocityText)
                     ReadOnlyLogValue("Sensor spacing", "%.3f in".format(spacingIn))
-                    ReadOnlyLogValue("Split time", "%.3f ms".format(result.splitMillis))
+                    ReadOnlyLogValue("Split time", result.splitTimeText())
                     Spacer(Modifier.height(10.dp))
                 }
                 OutlinedTextField(
