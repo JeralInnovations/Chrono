@@ -106,13 +106,13 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
 
     // photoPrompt is persisted so a camera-triggered process restart resumes
     // the photo step instead of losing it.
-    private fun promptPhotos(kind: String) {
+    private fun showPhotoPrompt(kind: String) {
         photoPrompt = kind; photoCount = 0
         prefs.edit().putString("photoPrompt", kind).apply()
     }
     fun dismissPhotoPrompt() {
         val kind = photoPrompt
-        if (kind == "setup") updateSetupPhotosNeeded(photoCount == 0)
+        if (kind == "setup") updateSetupPhotosNeeded(promptPhotoCount(kind) == 0)
         if (kind == "after") resultPromptUid = results.firstOrNull()?.uid
         photoPrompt = null
         prefs.edit().remove("photoPrompt").apply()
@@ -123,7 +123,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putBoolean("setupPhotosNeeded", needed).apply()
     }
 
-    fun requestSetupPhotos() = promptPhotos("setup")
+    fun requestSetupPhotos() = showPhotoPrompt("setup")
 
     fun finishResultPrompt(showLog: Boolean = true) {
         resultPromptUid = null
@@ -138,6 +138,23 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     fun newPhotoUri(): Uri? {
         val kind = photoPrompt ?: return null
         return session.newPhotoUri(kind, pendingLabel.trim())
+    }
+
+    fun promptPhotos(kind: String): List<Uri> =
+        session.listPromptPhotos(kind, pendingLabel.trim())
+
+    private fun promptPhotoCount(kind: String): Int = promptPhotos(kind).size
+
+    fun importPromptPhotos(uris: List<Uri>) {
+        val kind = photoPrompt ?: return
+        var added = 0
+        for (uri in uris) {
+            if (session.importPromptPhoto(kind, pendingLabel.trim(), uri)) added++
+        }
+        if (added > 0) {
+            photoCount += added
+            if (kind == "setup") updateSetupPhotosNeeded(false)
+        }
     }
 
     /** Image URIs already saved in a result's folder (thumbnails). */
@@ -260,7 +277,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
 
     fun dismissShotReview() {
         newShots.clear()
-        promptPhotos("after")
+        showPhotoPrompt("after")
     }
 
     private fun onRawResult(r: RawResult) {
@@ -357,7 +374,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         for (uri in photos) session.importPhoto(rec.shotFolder, uri)
         persist()
         pendingLabel = session.suggestedLabel()
-        promptPhotos("after")
+        showPhotoPrompt("after")
     }
 
     fun setResultThumbnail(uid: String, uri: String) {
@@ -607,7 +624,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         if (inWizard) {
             inWizard = false
             updateSetupPhotosNeeded(true)
-            promptPhotos("setup")   // capture the rig as it stands for this test
+            showPhotoPrompt("setup")   // capture the rig as it stands for this test
         }
     }
 

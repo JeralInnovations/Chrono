@@ -134,6 +134,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
     var manualEntry by remember { mutableStateOf(false) }
     // (photo uri, owning result uid) so the viewer can offer "set as cover"
     var fullscreenPhoto by remember { mutableStateOf<Pair<android.net.Uri, String>?>(null) }
+    var promptPhotoPreview by remember { mutableStateOf<android.net.Uri?>(null) }
     val context = LocalContext.current
 
     // System camera writing straight into the shot folder: no CAMERA permission.
@@ -141,6 +142,9 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
     val takePicture = rememberLauncherForActivityResult(
         ActivityResultContracts.TakePicture()
     ) { ok -> pendingPhoto?.let { vm.photoSaved(ok, it) }; pendingPhoto = null }
+    val pickPromptPhotos = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetMultipleContents()
+    ) { uris -> vm.importPromptPhotos(uris) }
 
     // Manual-logging mode: no device, so hide everything device-specific.
     val offline = connState == ConnState.DISCONNECTED
@@ -443,6 +447,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
             title = "Log result",
             dismissText = "Close",
             showDelete = false,
+            showRecordedValues = true,
             onDismiss = { vm.finishResultPrompt() },
             onSave = { label, tool, target, tdVal, tdUnit, outcome, epochMillis ->
                 vm.updateResult(r.uid, label, tool, target, tdVal, tdUnit, outcome, epochMillis)
@@ -536,6 +541,8 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
 
     // Photo prompts: after setup, and after each recorded shot.
     vm.photoPrompt?.let { kind ->
+        val promptPhotos = vm.promptPhotos(kind)
+        val savedCount = promptPhotos.size
         AlertDialog(
             onDismissRequest = { vm.dismissPhotoPrompt() },
             title = { Text(if (kind == "setup") "Setup photos" else "After photos") },
@@ -550,34 +557,82 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                                 "outcome. Saved with this shot's log.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    if (vm.photoCount > 0) {
+                    if (savedCount > 0) {
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "${vm.photoCount} photo${if (vm.photoCount == 1) "" else "s"} saved",
+                            "$savedCount photo${if (savedCount == 1) "" else "s"} saved",
                             style = MaterialTheme.typography.bodyMedium,
                             color = Good,
                         )
+                        Spacer(Modifier.height(8.dp))
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(promptPhotos) { uri ->
+                                AsyncImage(
+                                    model = uri,
+                                    contentDescription = "saved photo",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .size(72.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { promptPhotoPreview = uri },
+                                )
+                            }
+                        }
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    vm.newPhotoUri()?.let { uri ->
-                        pendingPhoto = uri
-                        runCatching { takePicture.launch(uri) }
+                Row {
+                    TextButton(onClick = { pickPromptPhotos.launch("image/*") }) {
+                        Icon(Icons.Filled.FolderOpen, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.size(6.dp))
+                        Text("Upload")
                     }
-                }) {
-                    Icon(Icons.Filled.PhotoCamera, null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.size(6.dp))
-                    Text(if (vm.photoCount == 0) "Take photo" else "Take another")
+                    TextButton(onClick = {
+                        vm.newPhotoUri()?.let { uri ->
+                            pendingPhoto = uri
+                            runCatching { takePicture.launch(uri) }
+                        }
+                    }) {
+                        Icon(Icons.Filled.PhotoCamera, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.size(6.dp))
+                        Text("Take Photo")
+                    }
                 }
             },
             dismissButton = {
                 TextButton(onClick = { vm.dismissPhotoPrompt() }) {
-                    Text(if (vm.photoCount == 0) "Skip" else "Done")
+                    Text(if (savedCount == 0) "Skip" else "Done")
                 }
             },
         )
+    }
+
+    promptPhotoPreview?.let { uri ->
+        Dialog(
+            onDismissRequest = { promptPhotoPreview = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.96f))
+                    .clickable { promptPhotoPreview = null },
+                contentAlignment = Alignment.Center,
+            ) {
+                AsyncImage(
+                    model = uri,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "Tap image to close",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.7f),
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp),
+                )
+            }
+        }
     }
 }
 
@@ -1251,11 +1306,35 @@ private fun parseDateField(text: String): Long? =
     }
 
 @Composable
+private fun ReadOnlyLogValue(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextDim,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextDim,
+            fontFamily = FontFamily.Monospace,
+        )
+    }
+}
+
+@Composable
 private fun EditResultDialog(
     result: TestResult,
     title: String = "Edit test",
     dismissText: String = "Cancel",
     showDelete: Boolean = true,
+    showRecordedValues: Boolean = false,
     onDismiss: () -> Unit,
     onSave: (
         label: String, tool: String, target: String,
@@ -1305,6 +1384,15 @@ private fun EditResultDialog(
         title = { Text(title) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
+                if (showRecordedValues) {
+                    val spacingIn = result.distanceM * 39.3701
+                    val velocityText = if (result.metersPerSecond > 0)
+                        "%.1f ft/s".format(result.feetPerSecond) else "Not recorded"
+                    ReadOnlyLogValue("Velocity", velocityText)
+                    ReadOnlyLogValue("Sensor spacing", "%.3f in".format(spacingIn))
+                    ReadOnlyLogValue("Split time", "%.3f ms".format(result.splitMillis))
+                    Spacer(Modifier.height(10.dp))
+                }
                 OutlinedTextField(
                     value = label,
                     onValueChange = { label = it },
@@ -1352,7 +1440,13 @@ private fun EditResultDialog(
                     label = { Text("Result") },
                     placeholder = { Text("penetration, depth, dent etc.", color = TextDim) },
                     textStyle = fieldText,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            if (showRecordedValues && outcome.isBlank()) Amber.copy(alpha = 0.14f)
+                            else Color.Transparent,
+                            RoundedCornerShape(8.dp),
+                        ),
                 )
                 Spacer(Modifier.height(8.dp))
                 DateTimeField(

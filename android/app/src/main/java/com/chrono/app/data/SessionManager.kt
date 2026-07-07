@@ -102,9 +102,18 @@ class SessionManager(private val context: Context, simulation: Boolean = false) 
 
     /** Setup photos open/join the upcoming test; after photos stay with it. */
     fun newPhotoUri(kind: String, label: String): Uri? {
-        val rel = if (kind == "after") (currentTestRel ?: currentTest(label)) else currentTest(label)
+        val rel = photoRel(kind, label)
         return createUriAt(rel, "${kind}_${System.currentTimeMillis()}.jpg", "image/jpeg")
     }
+
+    fun listPromptPhotos(kind: String, label: String): List<Uri> =
+        listPhotos(photoRel(kind, label))
+
+    fun importPromptPhoto(kind: String, label: String, source: Uri): Boolean =
+        importPhoto(photoRel(kind, label), source)
+
+    private fun photoRel(kind: String, label: String): String =
+        if (kind == "after") (currentTestRel ?: currentTest(label)) else currentTest(label)
 
     /** Writes the log into its test folder; returns the folder id for the record. */
     fun logShot(label: String, json: JSONObject): String {
