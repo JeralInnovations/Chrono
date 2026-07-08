@@ -24,7 +24,7 @@ object Exporter {
         val csv = File(dir, "chrono_results_$tag$stamp.csv")
         csv.writeText(buildString {
             appendLine(
-                "simulated,label,disruptor_type_model,target,standoff_value,standoff_unit," +
+                "simulated,label,shot_type,disruptor_type_model,target,standoff_value,standoff_unit," +
                     "disruptor_loading,projectile_type,pass_fail,special_notes,source,date_iso," +
                     "mcu_serial,split_time,split_ns,split_ms,distance_m,velocity_mps,velocity_fps"
             )
@@ -32,7 +32,8 @@ object Exporter {
                 val date = r.epochMillis?.let { Instant.ofEpochMilli(it).toString() } ?: ""
                 appendLine(
                     simulated.toString() + "," +
-                        esc(r.label) + "," + esc(r.tool) + "," + esc(r.target) + "," +
+                        esc(r.label) + "," + esc(r.shotType.ifBlank { "Standard" }) + "," +
+                        esc(r.tool) + "," + esc(r.target) + "," +
                         (r.targetDistValue?.toString() ?: "") + "," + r.targetDistUnit + "," +
                         esc(r.disruptorLoading) + "," + esc(r.projectileType.ifBlank { "Water" }) + "," +
                         esc(r.passFail) + "," + esc(r.specialNotes.ifBlank { r.outcome }) + "," +

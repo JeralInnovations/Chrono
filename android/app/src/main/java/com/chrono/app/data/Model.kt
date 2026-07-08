@@ -20,6 +20,7 @@ data class TestResult(
     /** null = device had no synced clock at the time of the shot */
     var epochMillis: Long?,
     var tool: String = "",
+    var shotType: String = "Standard",
     var disruptorLoading: String = "",
     var projectileType: String = "Water",
     /** distance to target kept as value+unit so it can be converted later */
@@ -120,6 +121,7 @@ class ResultStore(context: Context, simulation: Boolean = false) {
                     label = o.optString("label", ""),
                     epochMillis = o.optLong("epochMillis", -1L).takeIf { it > 0 },
                     tool = o.optString("tool", ""),
+                    shotType = o.optString("shotType", "Standard").ifBlank { "Standard" },
                     disruptorLoading = o.optString("disruptorLoading", ""),
                     projectileType = o.optString("projectileType", "Water").ifBlank { "Water" },
                     targetDistValue = o.optDouble("targetDistValue").takeIf { !it.isNaN() }
@@ -152,6 +154,7 @@ class ResultStore(context: Context, simulation: Boolean = false) {
                     .put("label", r.label)
                     .put("epochMillis", r.epochMillis ?: -1L)
                     .put("tool", r.tool)
+                    .put("shotType", r.shotType.ifBlank { "Standard" })
                     .put("disruptorLoading", r.disruptorLoading)
                     .put("projectileType", r.projectileType.ifBlank { "Water" })
                     .put("targetDistUnit", r.targetDistUnit)

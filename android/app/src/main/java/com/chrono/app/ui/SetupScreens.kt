@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -14,9 +16,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -28,6 +32,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,13 +44,41 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.chrono.app.ChronoViewModel
 import com.chrono.app.ble.ConnState
 import com.chrono.app.ble.Proto
 import com.chrono.app.data.DistanceUnit
 import com.chrono.app.ui.theme.Amber
 import com.chrono.app.ui.theme.Good
+import com.chrono.app.ui.theme.Teal
 import com.chrono.app.ui.theme.TextDim
+
+@Composable
+private fun SetupFieldLabel(label: String, help: String) {
+    var open by remember { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label)
+        Spacer(Modifier.size(6.dp))
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(18.dp)
+                .border(1.dp, Teal, RoundedCornerShape(9.dp))
+                .clickable { open = true },
+        ) {
+            Text("i", color = Teal, fontSize = 12.sp, textAlign = TextAlign.Center)
+        }
+    }
+    if (open) {
+        AlertDialog(
+            onDismissRequest = { open = false },
+            title = { Text(label) },
+            text = { Text(help, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center) },
+            confirmButton = { TextButton(onClick = { open = false }) { Text("OK") } },
+        )
+    }
+}
 
 /**
  * Shared "plug in and test a sensor" pane — used by the setup wizard and
@@ -92,14 +125,13 @@ fun VerifyPane(
             )
         } else {
             Text(
-                "1.  Press the spring clips and insert the two leads of the " +
-                    "$role sensor into port $sensor.",
+                "Insert the $role sensor leads into port $sensor.",
                 style = MaterialTheme.typography.bodyLarge,
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(14.dp))
             Text(
-                "2.  Now trigger the sensor once to test it.",
+                "Tap the sensor once.",
                 style = MaterialTheme.typography.bodyLarge,
                 textAlign = TextAlign.Center,
             )
@@ -141,10 +173,8 @@ fun BaselineScreen(vm: ChronoViewModel, connState: ConnState) {
         Text("Port baseline", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(10.dp))
         Text(
-            "Leave both sensor ports EMPTY — nothing plugged in. The device " +
-                "measures each bare port so that the sensor and cable can be " +
-                "measured separately in the next steps.",
-            style = MaterialTheme.typography.bodyMedium,
+            "Leave both ports empty. This sets the zero point for sensor checks.",
+            style = MaterialTheme.typography.bodyLarge,
             color = TextDim,
             textAlign = TextAlign.Center,
         )
@@ -167,10 +197,9 @@ fun BaselineScreen(vm: ChronoViewModel, connState: ConnState) {
         if (baselineWarning) {
             Spacer(Modifier.height(14.dp))
             Text(
-                "Baseline did not return usable capacitance samples. You can continue to the tap tests, " +
-                    "but capacitance-based sensor detection and confidence estimates will be limited.",
+                "Baseline failed. Tap tests can continue; capacitance checks will be limited.",
                 color = Amber,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodyLarge,
                 textAlign = TextAlign.Center,
             )
         }
@@ -255,8 +284,7 @@ fun SensorSetupScreen(
                 TerminalGraphic(pulsing = false, verified = false)
                 Spacer(Modifier.height(24.dp))
                 Text(
-                    "Press the spring clips and insert the $role sensor leads into " +
-                        "port $sensor. Nothing is armed — take your time.",
+                    "Install the $role sensor in port $sensor. Nothing is armed.",
                     style = MaterialTheme.typography.bodyLarge,
                     textAlign = TextAlign.Center,
                 )
@@ -281,9 +309,8 @@ fun SensorSetupScreen(
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Measuring the port with the sensor attached and comparing to " +
-                        "the empty-port baseline. The wire and sensor should add capacitance.",
-                    style = MaterialTheme.typography.bodyMedium,
+                    "Sensor and cable should add capacitance over baseline.",
+                    style = MaterialTheme.typography.bodyLarge,
                     color = TextDim,
                     textAlign = TextAlign.Center,
                 )
@@ -294,17 +321,18 @@ fun SensorSetupScreen(
                     Text("Checking capacitance…", color = TextDim)
                 } else when {
                     loadEntry == null -> Text(
-                        "No capacitance attempt recorded. Press Re-measure, or continue to the tap test if the sensor is physically installed.",
+                        "No reading yet. Re-measure or run the tap test.",
                         color = Amber, textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.bodyLarge,
                     )
                     loadEntry.isUsable != true -> Text(
-                        "Capacitance check returned no usable samples. Continue with the tap test to verify impact detection, or re-measure after checking the leads.",
+                        "No usable capacitance samples. Check leads or run the tap test.",
                         color = Amber,
                         style = MaterialTheme.typography.bodyLarge,
                         textAlign = TextAlign.Center,
                     )
                     baselineEntry?.isUsable != true -> Text(
-                        "Baseline was not usable, so the app cannot compare capacitance. Continue with the tap test to verify this sensor.",
+                        "Baseline is unavailable. Use the tap test to verify the sensor.",
                         color = Amber,
                         style = MaterialTheme.typography.bodyLarge,
                         textAlign = TextAlign.Center,
@@ -322,7 +350,7 @@ fun SensorSetupScreen(
                         )
                     }
                     else -> Text(
-                        "No capacitance increase over the empty-port baseline. The sensor may not be attached; check the clips, or continue to the tap test if you want to verify impact detection directly.",
+                        "No capacitance increase. Check clips or run the tap test.",
                         color = Amber,
                         style = MaterialTheme.typography.bodyLarge,
                         textAlign = TextAlign.Center,
@@ -352,8 +380,7 @@ fun SensorSetupScreen(
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Firmly tap the sensor once to confirm it produces a voltage rise " +
-                        "on impact.",
+                    "Tap once to confirm impact detection.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextDim,
                     textAlign = TextAlign.Center,
@@ -398,9 +425,8 @@ fun DistanceScreen(vm: ChronoViewModel) {
         Text("Sensor spacing", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(10.dp))
         Text(
-            "Measure the exact distance between the START and STOP sensors. " +
-                "Velocity is calculated from this value, so measure carefully.",
-            style = MaterialTheme.typography.bodyMedium,
+            "Measure START sensor to STOP sensor.",
+            style = MaterialTheme.typography.bodyLarge,
             color = TextDim,
             textAlign = TextAlign.Center,
         )
@@ -411,7 +437,7 @@ fun DistanceScreen(vm: ChronoViewModel) {
                 value = text,
                 onValueChange = { text = it },
                 modifier = Modifier.weight(1f),
-                label = { Text("Distance") },
+                label = { SetupFieldLabel("Distance", "Exact START-to-STOP sensor spacing used for velocity calculations.") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
             )

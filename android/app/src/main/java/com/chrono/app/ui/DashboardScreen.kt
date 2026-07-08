@@ -121,7 +121,7 @@ fun ReconnectingBanner() {
         )
         Spacer(Modifier.size(10.dp))
         Text(
-            "Connection lost — reconnecting… results are safe on the device.",
+            "Connection lost. Reconnecting; results stay on the device.",
             style = MaterialTheme.typography.bodyMedium,
             color = Bad,
         )
@@ -206,7 +206,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        "Simulation mode — no hardware connected.",
+                        "Simulation mode. No hardware connected.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = Teal,
                         modifier = Modifier.weight(1f),
@@ -337,9 +337,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                 Column {
                     when (step) {
                         "attach" -> Text(
-                            "Fit the new sensor into port $sensor and route the wire. " +
-                                "Nothing is armed yet — take your time. Confirm below " +
-                                "when it's physically in place.",
+                        "Install the sensor in port $sensor. Nothing is armed.",
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         "measure" -> {
@@ -363,15 +361,13 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                                         style = MaterialTheme.typography.bodyMedium,
                                     )
                                     load > 250 -> Text(
-                                        "Sensor detected: capacitance is +%.2f us over the bare-port baseline (about %s). Looks attached."
+                                        "Sensor detected: +%.2f us over baseline (about %s)."
                                             .format(load / 1000.0, vm.capacitanceText(load)),
                                         color = Good,
                                         style = MaterialTheme.typography.bodyMedium,
                                     )
                                     else -> Text(
-                                        "No capacitance increase over the bare-port " +
-                                            "baseline — the sensor doesn't look attached. " +
-                                            "Check the clips and re-measure.",
+                                        "No capacitance increase. Check clips and re-measure.",
                                         color = Amber,
                                         style = MaterialTheme.typography.bodyMedium,
                                     )
@@ -473,9 +469,9 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
             showDelete = false,
             showRecordedValues = true,
             onDismiss = { vm.finishResultPrompt() },
-            onSave = { label, tool, target, tdVal, tdUnit, loading, projectile, passFail, notes, epochMillis ->
+            onSave = { label, shotType, tool, target, tdVal, tdUnit, loading, projectile, passFail, notes, epochMillis ->
                 vm.updateResult(
-                    r.uid, label, tool, loading, projectile, target, tdVal, tdUnit,
+                    r.uid, label, shotType, tool, loading, projectile, target, tdVal, tdUnit,
                     passFail, notes, epochMillis,
                 )
                 vm.finishResultPrompt()
@@ -492,9 +488,9 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
         EditResultDialog(
             result = r,
             onDismiss = { editing = null },
-            onSave = { label, tool, target, tdVal, tdUnit, loading, projectile, passFail, notes, epochMillis ->
+            onSave = { label, shotType, tool, target, tdVal, tdUnit, loading, projectile, passFail, notes, epochMillis ->
                 vm.updateResult(
-                    r.uid, label, tool, loading, projectile, target, tdVal, tdUnit,
+                    r.uid, label, shotType, tool, loading, projectile, target, tdVal, tdUnit,
                     passFail, notes, epochMillis,
                 )
                 editing = null
@@ -562,9 +558,9 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
         ManualEntryDialog(
             vm = vm,
             onDismiss = { manualEntry = false },
-            onSave = { label, tool, target, tdVal, tdUnit, loading, projectile, passFail, notes, vel, velFps, epoch, photos ->
+            onSave = { label, shotType, tool, target, tdVal, tdUnit, loading, projectile, passFail, notes, vel, velFps, epoch, photos ->
                 vm.addManualEntry(
-                    label, tool, loading, projectile, target, tdVal, tdUnit,
+                    label, shotType, tool, loading, projectile, target, tdVal, tdUnit,
                     passFail, notes, vel, velFps, epoch, photos,
                 )
                 manualEntry = false
@@ -583,12 +579,12 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                 Column {
                     Text(
                         if (kind == "setup")
-                            "Photograph your rig as it stands for this test — sensor " +
-                                "placement, spacing, tool. Saved to this shot's folder."
+                            "Capture setup angles before the shot."
                         else
-                            "Photograph the target and anything notable about the " +
-                            "result notes. Saved with this shot's log.",
-                        style = MaterialTheme.typography.bodyMedium,
+                            "Capture target condition after the shot.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                     if (savedCount > 0) {
                         Spacer(Modifier.height(8.dp))
@@ -1097,26 +1093,30 @@ private fun NextTestCard(vm: ChronoViewModel, armed: Boolean) {
             Text("Next test", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(2.dp))
             Text(
-                "Applied to the next result; everything is editable afterwards.",
-                style = MaterialTheme.typography.bodyMedium,
+                "Saved with the next shot. Editable later.",
+                style = MaterialTheme.typography.bodyLarge,
                 color = TextDim,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(10.dp))
             OutlinedTextField(
                 value = vm.pendingLabel,
                 onValueChange = { vm.pendingLabel = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Label") },
-                placeholder = { Text("20 degree upward angle, (any special notes)", color = TextDim) },
+                label = { FieldLabel("Label", "Short name for this shot, such as Test 1 or 20 degree upward angle.") },
+                placeholder = { Text("Test 1", color = TextDim) },
                 textStyle = fieldText,
                 singleLine = true,
             )
+            Spacer(Modifier.height(8.dp))
+            ShotTypeSelector(vm.pendingShotType) { vm.pendingShotType = it }
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = vm.pendingTool,
                 onValueChange = { vm.pendingTool = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Disruptor Type/Model") },
+                label = { FieldLabel("Disruptor Type/Model", "Manufacturer and model or locally used identifier for the disruptor.") },
                 placeholder = { Text("PAN BK40, Hydrajet C2, etc.", color = TextDim) },
                 textStyle = fieldText,
                 singleLine = true,
@@ -1126,7 +1126,7 @@ private fun NextTestCard(vm: ChronoViewModel, armed: Boolean) {
                 value = vm.pendingDisruptorLoading,
                 onValueChange = { vm.pendingDisruptorLoading = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Disruptor loading") },
+                label = { FieldLabel("Disruptor loading", "Load or charge configuration used for this shot.") },
                 placeholder = { Text("charge/load configuration", color = TextDim) },
                 textStyle = fieldText,
                 singleLine = true,
@@ -1136,7 +1136,7 @@ private fun NextTestCard(vm: ChronoViewModel, armed: Boolean) {
                 value = vm.pendingProjectileType,
                 onValueChange = { vm.pendingProjectileType = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Projectile Type") },
+                label = { FieldLabel("Projectile Type", "Material launched by the disruptor. Water is the default.") },
                 placeholder = { Text("Water", color = TextDim) },
                 textStyle = fieldText,
                 singleLine = true,
@@ -1146,7 +1146,7 @@ private fun NextTestCard(vm: ChronoViewModel, armed: Boolean) {
                 value = vm.pendingTarget,
                 onValueChange = { vm.pendingTarget = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Target") },
+                label = { FieldLabel("Target", "Target item or test article being engaged.") },
                 placeholder = { Text("Ammo Can etc.", color = TextDim) },
                 textStyle = fieldText,
                 singleLine = true,
@@ -1156,7 +1156,7 @@ private fun NextTestCard(vm: ChronoViewModel, armed: Boolean) {
                 value = vm.pendingTargetDistVal,
                 onValueChange = { vm.pendingTargetDistVal = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Stand-Off Distance") },
+                label = { FieldLabel("Stand-Off Distance", "Distance from the disruptor muzzle/reference point to the target.") },
                 placeholder = { Text("25", color = TextDim) },
                 textStyle = fieldText,
                 singleLine = true,
@@ -1341,6 +1341,7 @@ private fun ResultCard(
                     color = if (r.isManual) Teal else TextDim,
                 )
                 val meta = listOfNotNull(
+                    r.shotType.ifBlank { "Standard" },
                     r.tool.takeIf { it.isNotBlank() }?.let { "Disruptor: $it" },
                     r.disruptorLoading.takeIf { it.isNotBlank() }?.let { "Loading: $it" },
                     r.projectileType.ifBlank { "Water" }.let { "Projectile: $it" },
@@ -1389,6 +1390,68 @@ private fun ResultCard(
 
 private val EDIT_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
+@Composable
+private fun FieldLabel(label: String, help: String? = null) {
+    var open by remember { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label)
+        if (help != null) {
+            Spacer(Modifier.size(6.dp))
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(18.dp)
+                    .border(1.dp, Teal, RoundedCornerShape(9.dp))
+                    .clickable { open = true },
+            ) {
+                Text("i", color = Teal, fontSize = 12.sp, textAlign = TextAlign.Center)
+            }
+        }
+    }
+    if (open && help != null) {
+        AlertDialog(
+            onDismissRequest = { open = false },
+            title = { Text(label) },
+            text = {
+                Text(
+                    help,
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { open = false }) { Text("OK") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun ChoiceSelector(
+    label: String,
+    value: String,
+    options: List<String>,
+    help: String? = null,
+    onChange: (String) -> Unit,
+) {
+    FieldLabel(label, help)
+    Spacer(Modifier.height(6.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+        options.forEach { option ->
+            val selected = value.equals(option, ignoreCase = true)
+            if (selected) {
+                Button(onClick = { onChange(option) }, modifier = Modifier.weight(1f)) {
+                    Text(option, textAlign = TextAlign.Center)
+                }
+            } else {
+                OutlinedButton(onClick = { onChange(option) }, modifier = Modifier.weight(1f)) {
+                    Text(option, textAlign = TextAlign.Center)
+                }
+            }
+        }
+    }
+}
+
 /** Compact tap-to-open unit picker, used as a trailing icon inside fields. */
 @Composable
 private fun UnitSelector(unit: String, onSelect: (String) -> Unit) {
@@ -1425,7 +1488,7 @@ private fun DateTimeField(
     OutlinedTextField(
         value = field,
         onValueChange = onChange,
-        label = { Text("Date & time") },
+        label = { FieldLabel("Date & time", "Shot date and local time used in the log and export.") },
         placeholder = { Text("tap to fill current time", color = TextDim) },
         textStyle = MaterialTheme.typography.bodyMedium,
         singleLine = true,
@@ -1478,22 +1541,24 @@ private fun ReadOnlyLogValue(label: String, value: String) {
 
 @Composable
 private fun PassFailSelector(value: String, onChange: (String) -> Unit) {
-    Text("Pass/Fail", style = MaterialTheme.typography.labelSmall, color = TextDim)
-    Spacer(Modifier.height(6.dp))
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-        listOf("Pass", "Fail").forEach { option ->
-            val selected = value.equals(option, ignoreCase = true)
-            if (selected) {
-                Button(onClick = { onChange(option) }, modifier = Modifier.weight(1f)) {
-                    Text(option)
-                }
-            } else {
-                OutlinedButton(onClick = { onChange(option) }, modifier = Modifier.weight(1f)) {
-                    Text(option)
-                }
-            }
-        }
-    }
+    ChoiceSelector(
+        label = "Pass/Fail",
+        value = value,
+        options = listOf("Pass", "Fail"),
+        help = "Primary success metric for the shot. Use Pass when the shot met the intended test objective.",
+        onChange = onChange,
+    )
+}
+
+@Composable
+private fun ShotTypeSelector(value: String, onChange: (String) -> Unit) {
+    ChoiceSelector(
+        label = "Shot Type",
+        value = value.ifBlank { "Standard" },
+        options = listOf("Standard", "Experimental"),
+        help = "Standard means the shot follows FBI or manufacturer guidance. Experimental means any setup outside those recommendations.",
+        onChange = onChange,
+    )
 }
 
 @Composable
@@ -1505,7 +1570,7 @@ private fun EditResultDialog(
     showRecordedValues: Boolean = false,
     onDismiss: () -> Unit,
     onSave: (
-        label: String, tool: String, target: String,
+        label: String, shotType: String, tool: String, target: String,
         targetDistValue: Double?, targetDistUnit: String,
         disruptorLoading: String, projectileType: String,
         passFail: String, specialNotes: String, epochMillis: Long?,
@@ -1528,6 +1593,7 @@ private fun EditResultDialog(
         }
     }
     var label by remember { mutableStateOf(result.label) }
+    var shotType by remember { mutableStateOf(result.shotType.ifBlank { "Standard" }) }
     var tool by remember { mutableStateOf(result.tool) }
     var disruptorLoading by remember { mutableStateOf(result.disruptorLoading) }
     var projectileType by remember { mutableStateOf(result.projectileType.ifBlank { "Water" }) }
@@ -1573,17 +1639,19 @@ private fun EditResultDialog(
                 OutlinedTextField(
                     value = label,
                     onValueChange = { label = it },
-                    label = { Text("Label") },
-                    placeholder = { Text("20 degree upward angle, (any special notes)", color = TextDim) },
+                    label = { FieldLabel("Label", "Short name for this shot.") },
+                    placeholder = { Text("Test 1", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
+                ShotTypeSelector(shotType) { shotType = it }
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = tool,
                     onValueChange = { tool = it },
-                    label = { Text("Disruptor Type/Model") },
+                    label = { FieldLabel("Disruptor Type/Model", "Manufacturer and model or locally used identifier for the disruptor.") },
                     placeholder = { Text("PAN BK40, Hydrajet C2, etc.", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
@@ -1593,7 +1661,7 @@ private fun EditResultDialog(
                 OutlinedTextField(
                     value = disruptorLoading,
                     onValueChange = { disruptorLoading = it },
-                    label = { Text("Disruptor loading") },
+                    label = { FieldLabel("Disruptor loading", "Load or charge configuration used for this shot.") },
                     placeholder = { Text("charge/load configuration", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
@@ -1603,7 +1671,7 @@ private fun EditResultDialog(
                 OutlinedTextField(
                     value = projectileType,
                     onValueChange = { projectileType = it },
-                    label = { Text("Projectile Type") },
+                    label = { FieldLabel("Projectile Type", "Material launched by the disruptor. Water is the default.") },
                     placeholder = { Text("Water", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
@@ -1613,7 +1681,7 @@ private fun EditResultDialog(
                 OutlinedTextField(
                     value = target,
                     onValueChange = { target = it },
-                    label = { Text("Target") },
+                    label = { FieldLabel("Target", "Target item or test article being engaged.") },
                     placeholder = { Text("Ammo Can etc.", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
@@ -1623,7 +1691,7 @@ private fun EditResultDialog(
                 OutlinedTextField(
                     value = tdVal,
                     onValueChange = { tdVal = it },
-                    label = { Text("Stand-Off Distance") },
+                    label = { FieldLabel("Stand-Off Distance", "Distance from the disruptor muzzle/reference point to the target.") },
                     textStyle = fieldText,
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -1636,7 +1704,7 @@ private fun EditResultDialog(
                 OutlinedTextField(
                     value = specialNotes,
                     onValueChange = { specialNotes = it },
-                    label = { Text("Special Notes") },
+                    label = { FieldLabel("Special Notes", "Anything useful for later review: setup deviations, target condition, observed effect, or photo context.") },
                     placeholder = { Text("penetration, depth, dent etc.", color = TextDim) },
                     textStyle = fieldText,
                     modifier = Modifier
@@ -1701,7 +1769,7 @@ private fun EditResultDialog(
             TextButton(
                 onClick = {
                     onSave(
-                        label.trim(), tool.trim(), target.trim(),
+                        label.trim(), shotType.trim().ifBlank { "Standard" }, tool.trim(), target.trim(),
                         tdVal.replace(',', '.').toDoubleOrNull(), tdUnit,
                         disruptorLoading.trim(), projectileType.trim().ifBlank { "Water" },
                         passFail.trim(), specialNotes.trim(), parsedDate,
@@ -1721,7 +1789,7 @@ private fun ManualEntryDialog(
     vm: ChronoViewModel,
     onDismiss: () -> Unit,
     onSave: (
-        label: String, tool: String, target: String,
+        label: String, shotType: String, tool: String, target: String,
         targetDistValue: Double?, targetDistUnit: String,
         disruptorLoading: String, projectileType: String,
         passFail: String, specialNotes: String,
@@ -1734,6 +1802,7 @@ private fun ManualEntryDialog(
         ActivityResultContracts.GetMultipleContents()
     ) { uris -> pickedPhotos = pickedPhotos + uris }
     var label by remember { mutableStateOf(vm.pendingLabel) }
+    var shotType by remember { mutableStateOf(vm.pendingShotType.ifBlank { "Standard" }) }
     var tool by remember { mutableStateOf(vm.pendingTool) }
     var disruptorLoading by remember { mutableStateOf(vm.pendingDisruptorLoading) }
     var projectileType by remember { mutableStateOf(vm.pendingProjectileType.ifBlank { "Water" }) }
@@ -1763,16 +1832,17 @@ private fun ManualEntryDialog(
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text(
-                    "Log a shot without a connected chronograph. Velocity is " +
-                        "optional — leave it blank for a notes/photos-only entry.",
-                    style = MaterialTheme.typography.bodyMedium,
+                    "Log a shot without a connected chronograph.",
+                    style = MaterialTheme.typography.bodyLarge,
                     color = TextDim,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(10.dp))
                 OutlinedTextField(
                     value = velText,
                     onValueChange = { velText = it },
-                    label = { Text("Velocity (optional)") },
+                    label = { FieldLabel("Velocity (optional)", "Known or manually measured projectile velocity. Leave blank for notes/photos only.") },
                     textStyle = fieldText,
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -1798,17 +1868,19 @@ private fun ManualEntryDialog(
                 OutlinedTextField(
                     value = label,
                     onValueChange = { label = it },
-                    label = { Text("Label") },
-                    placeholder = { Text("20 degree upward angle, (any special notes)", color = TextDim) },
+                    label = { FieldLabel("Label", "Short name for this shot.") },
+                    placeholder = { Text("Test 1", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
+                ShotTypeSelector(shotType) { shotType = it }
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = tool,
                     onValueChange = { tool = it },
-                    label = { Text("Disruptor Type/Model") },
+                    label = { FieldLabel("Disruptor Type/Model", "Manufacturer and model or locally used identifier for the disruptor.") },
                     placeholder = { Text("PAN BK40, Hydrajet C2, etc.", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
@@ -1818,7 +1890,7 @@ private fun ManualEntryDialog(
                 OutlinedTextField(
                     value = disruptorLoading,
                     onValueChange = { disruptorLoading = it },
-                    label = { Text("Disruptor loading") },
+                    label = { FieldLabel("Disruptor loading", "Load or charge configuration used for this shot.") },
                     placeholder = { Text("charge/load configuration", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
@@ -1828,7 +1900,7 @@ private fun ManualEntryDialog(
                 OutlinedTextField(
                     value = projectileType,
                     onValueChange = { projectileType = it },
-                    label = { Text("Projectile Type") },
+                    label = { FieldLabel("Projectile Type", "Material launched by the disruptor. Water is the default.") },
                     placeholder = { Text("Water", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
@@ -1838,7 +1910,7 @@ private fun ManualEntryDialog(
                 OutlinedTextField(
                     value = target,
                     onValueChange = { target = it },
-                    label = { Text("Target") },
+                    label = { FieldLabel("Target", "Target item or test article being engaged.") },
                     placeholder = { Text("Ammo Can etc.", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
@@ -1848,7 +1920,7 @@ private fun ManualEntryDialog(
                 OutlinedTextField(
                     value = tdVal,
                     onValueChange = { tdVal = it },
-                    label = { Text("Stand-Off Distance") },
+                    label = { FieldLabel("Stand-Off Distance", "Distance from the disruptor muzzle/reference point to the target.") },
                     textStyle = fieldText,
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -1861,7 +1933,7 @@ private fun ManualEntryDialog(
                 OutlinedTextField(
                     value = specialNotes,
                     onValueChange = { specialNotes = it },
-                    label = { Text("Special Notes") },
+                    label = { FieldLabel("Special Notes", "Anything useful for later review: setup deviations, target condition, observed effect, or photo context.") },
                     placeholder = { Text("penetration, depth, dent etc.", color = TextDim) },
                     textStyle = fieldText,
                     modifier = Modifier.fillMaxWidth(),
@@ -1889,7 +1961,7 @@ private fun ManualEntryDialog(
             TextButton(
                 onClick = {
                     onSave(
-                        label.trim(), tool.trim(), target.trim(),
+                        label.trim(), shotType.trim().ifBlank { "Standard" }, tool.trim(), target.trim(),
                         tdVal.replace(',', '.').toDoubleOrNull(), tdUnit,
                         disruptorLoading.trim(), projectileType.trim().ifBlank { "Water" },
                         passFail.trim(), specialNotes.trim(),

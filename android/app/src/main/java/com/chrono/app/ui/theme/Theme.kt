@@ -45,7 +45,7 @@ private val ChronoType = Typography(
         fontFamily = FontFamily.Monospace,
         fontWeight = FontWeight.Bold,
         fontSize = 52.sp,
-        letterSpacing = (-1).sp,
+        letterSpacing = 0.sp,
     ),
     headlineMedium = TextStyle(
         fontWeight = FontWeight.SemiBold,
@@ -53,20 +53,20 @@ private val ChronoType = Typography(
     ),
     titleMedium = TextStyle(
         fontWeight = FontWeight.SemiBold,
-        fontSize = 17.sp,
-        letterSpacing = 0.2.sp,
+        fontSize = 18.sp,
+        letterSpacing = 0.sp,
     ),
-    bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 24.sp),
-    bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 20.sp),
+    bodyLarge = TextStyle(fontSize = 17.sp, lineHeight = 25.sp),
+    bodyMedium = TextStyle(fontSize = 15.sp, lineHeight = 22.sp),
     labelLarge = TextStyle(
         fontWeight = FontWeight.SemiBold,
-        fontSize = 14.sp,
-        letterSpacing = 1.2.sp,
+        fontSize = 15.sp,
+        letterSpacing = 0.sp,
     ),
     labelSmall = TextStyle(
         fontWeight = FontWeight.Medium,
-        fontSize = 11.sp,
-        letterSpacing = 1.5.sp,
+        fontSize = 12.sp,
+        letterSpacing = 0.sp,
     ),
 )
 

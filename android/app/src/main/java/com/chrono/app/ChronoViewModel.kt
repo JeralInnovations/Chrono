@@ -65,6 +65,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
      *  Shot setup fields persist across sessions (they rarely change mid-range-day). */
     // Auto-fills Test1, Test2, … per project; the user can override it.
     var pendingLabel by mutableStateOf(session.suggestedLabel())
+    var pendingShotType by mutableStateOf(prefs.getString("pendShotType", "Standard") ?: "Standard")
     var pendingTool by mutableStateOf(prefs.getString("pendTool", "") ?: "")
     var pendingDisruptorLoading by mutableStateOf(prefs.getString("pendLoading", "") ?: "")
     var pendingProjectileType by mutableStateOf(prefs.getString("pendProjectile", "Water") ?: "Water")
@@ -311,6 +312,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
                 distanceM = distanceM,
                 label = pendingLabel.trim(),
                 epochMillis = if (r.epochSec > 0) r.epochSec * 1000L else null,
+                shotType = pendingShotType.ifBlank { "Standard" },
                 tool = pendingTool.trim(),
                 disruptorLoading = pendingDisruptorLoading.trim(),
                 projectileType = pendingProjectileType.trim().ifBlank { "Water" },
@@ -324,6 +326,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
             results.add(0, rec)
             persist()
             prefs.edit()
+                .putString("pendShotType", pendingShotType.ifBlank { "Standard" })
                 .putString("pendTool", pendingTool)
                 .putString("pendLoading", pendingDisruptorLoading)
                 .putString("pendProjectile", pendingProjectileType.ifBlank { "Water" })
@@ -345,6 +348,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     fun updateResult(
         uid: String,
         label: String,
+        shotType: String,
         tool: String,
         disruptorLoading: String,
         projectileType: String,
@@ -360,6 +364,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         val r = results[idx]
         results[idx] = r.copy(
             label = label,
+            shotType = shotType.ifBlank { "Standard" },
             tool = tool,
             disruptorLoading = disruptorLoading,
             projectileType = projectileType.ifBlank { "Water" },
@@ -377,6 +382,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     /** Log a shot with no chronograph connected — velocity typed in (or blank). */
     fun addManualEntry(
         label: String,
+        shotType: String,
         tool: String,
         disruptorLoading: String,
         projectileType: String,
@@ -398,6 +404,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
             distanceM = 0.0,
             label = label.trim(),
             epochMillis = epochMillis,
+            shotType = shotType.trim().ifBlank { "Standard" },
             tool = tool.trim(),
             disruptorLoading = disruptorLoading.trim(),
             projectileType = projectileType.trim().ifBlank { "Water" },
@@ -466,6 +473,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         .put("uid", r.uid)
         .put("source", if (r.isManual) "manual" else "device")
         .put("label", r.label)
+        .put("shotType", r.shotType.ifBlank { "Standard" })
         .put("tool", r.tool)
         .put("disruptorTypeModel", r.tool)
         .put("disruptorLoading", r.disruptorLoading)
