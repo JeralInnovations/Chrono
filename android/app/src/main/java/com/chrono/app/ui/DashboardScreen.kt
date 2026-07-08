@@ -931,7 +931,7 @@ private fun RigCard(vm: ChronoViewModel, enabled: Boolean) {
                             Spacer(Modifier.size(6.dp))
                             InfoDot(
                                 "GAE",
-                                "Guaranteed Accuracy Envelope combines timer resolution, clock drift, edge jitter, sensor calibration balance, repeatability, and sensor spacing uncertainty. Faster shots and shorter spacing widen the percent.",
+                                "GAE means Guaranteed Accuracy Envelope. It is the app's conservative +/- percent range around the measured velocity. For example, 1000 ft/s with +/- 2% GAE means the measurement should be treated as about 980 to 1020 ft/s. The app builds that percent from timer resolution, clock drift, edge jitter, sensor spacing uncertainty, and calibration data. Faster shots and shorter sensor spacing widen the envelope because the same timing error is a larger share of the measurement. Closely matched channel calibration narrows it.",
                             )
                         }
                     }
