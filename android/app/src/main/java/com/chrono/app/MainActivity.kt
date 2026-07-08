@@ -101,7 +101,7 @@ private fun PermissionGate(content: @Composable () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                "Chrono needs Bluetooth permission to find and talk to your chronograph.",
+                "Chrono Logger needs Bluetooth permission to find and talk to your device.",
                 style = MaterialTheme.typography.bodyLarge,
                 textAlign = TextAlign.Center,
             )

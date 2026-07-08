@@ -72,9 +72,9 @@ fun ConnectScreen(vm: ChronoViewModel, connState: ConnState) {
             color = TextDim,
         )
         Spacer(Modifier.height(4.dp))
-        Text("CHRONO", style = MaterialTheme.typography.displayLarge, color = Amber)
+        Text("CHRONO LOGGER", style = MaterialTheme.typography.displayLarge, color = Amber)
         Text(
-            "BLE CHRONOGRAPH",
+            "BLE SHOT LOGGER",
             style = MaterialTheme.typography.labelSmall,
             color = TextDim,
         )
@@ -85,7 +85,7 @@ fun ConnectScreen(vm: ChronoViewModel, connState: ConnState) {
                 Icon(Icons.Filled.Bluetooth, null, tint = TextDim, modifier = Modifier.size(48.dp))
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    "Bluetooth is off. Turn it on to find your chronograph.",
+                    "Bluetooth is off. Turn it on to find your logger.",
                     textAlign = TextAlign.Center,
                     color = TextDim,
                 )
@@ -107,7 +107,7 @@ fun ConnectScreen(vm: ChronoViewModel, connState: ConnState) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.BluetoothSearching, null, tint = Amber)
                     Spacer(Modifier.size(10.dp))
-                    Text("Searching for your chronograph…", color = TextDim)
+                    Text("Searching for your logger...", color = TextDim)
                 }
                 Spacer(Modifier.height(24.dp))
                 if (found.isEmpty()) {

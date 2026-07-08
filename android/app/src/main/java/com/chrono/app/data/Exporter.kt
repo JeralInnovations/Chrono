@@ -60,7 +60,7 @@ object Exporter {
             putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(send, "Export Chrono data"))
+        context.startActivity(Intent.createChooser(send, "Export Chrono Logger data"))
     }
 
     private fun esc(s: String) = "\"" + s.replace("\"", "\"\"") + "\""

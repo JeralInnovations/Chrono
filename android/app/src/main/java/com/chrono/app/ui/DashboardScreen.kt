@@ -225,7 +225,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
         if (offline) {
             item {
                 Text(
-                    "Manual logging — no chronograph connected. Entries, photos, " +
+                    "Manual logging. Entries, photos, " +
                         "and exports work; measuring needs the device.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextDim,
@@ -260,7 +260,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                         photos = setupPhotos,
                         selected = selectedSetupPhoto,
                         onOpen = { promptPhotoPreview = it },
-                        onSelect = { selectedSetupPhoto = it },
+                        onSelect = { selectedSetupPhoto = if (selectedSetupPhoto == it) null else it },
                         onDelete = {
                             selectedSetupPhoto?.let { vm.deletePromptPhoto(it) }
                             selectedSetupPhoto = null
@@ -599,8 +599,11 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                                 PhotoThumbnail(
                                     uri = uri,
                                     selected = selectedPromptPhoto == uri,
+                                    selectionMode = selectedPromptPhoto != null,
                                     onOpen = { promptPhotoPreview = uri },
-                                    onSelect = { selectedPromptPhoto = uri },
+                                    onSelect = {
+                                        selectedPromptPhoto = if (selectedPromptPhoto == uri) null else uri
+                                    },
                                 )
                             }
                         }
@@ -708,6 +711,7 @@ private fun SetupPhotoStrip(
                 PhotoThumbnail(
                     uri = uri,
                     selected = selected == uri,
+                    selectionMode = selected != null,
                     onOpen = { onOpen(uri) },
                     onSelect = { onSelect(uri) },
                 )
@@ -720,6 +724,7 @@ private fun SetupPhotoStrip(
 private fun PhotoThumbnail(
     uri: android.net.Uri,
     selected: Boolean,
+    selectionMode: Boolean = false,
     onOpen: () -> Unit,
     onSelect: () -> Unit,
     modifier: Modifier = Modifier,
@@ -736,9 +741,9 @@ private fun PhotoThumbnail(
                 color = if (selected) Bad else Color.Transparent,
                 shape = RoundedCornerShape(8.dp),
             )
-            .pointerInput(uri) {
+            .pointerInput(uri, selected, selectionMode) {
                 detectTapGestures(
-                    onTap = { onOpen() },
+                    onTap = { if (selected || selectionMode) onSelect() else onOpen() },
                     onLongPress = { onSelect() },
                 )
             },
@@ -819,7 +824,7 @@ private fun TopBar(vm: ChronoViewModel, connState: ConnState, deviceStatus: Devi
                 color = TextDim,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("CHRONO", style = MaterialTheme.typography.headlineMedium, color = Amber)
+                Text("CHRONO LOGGER", style = MaterialTheme.typography.headlineMedium, color = Amber)
                 if (vm.isSimulation) {
                     Spacer(Modifier.size(10.dp))
                     Text(
@@ -917,11 +922,18 @@ private fun RigCard(vm: ChronoViewModel, enabled: Boolean) {
                         color = TextDim,
                     )
                     vm.estimatedAccuracyEnvelopeAtCurrentSpacing()?.let { ci ->
-                        Text(
-                            "about +/- %.1f%% GAE here".format(ci),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (ci > 2.0) Amber else TextDim,
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "about +/- %.1f%% GAE here".format(ci),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (ci > 2.0) Amber else TextDim,
+                            )
+                            Spacer(Modifier.size(6.dp))
+                            InfoDot(
+                                "GAE",
+                                "Guaranteed Accuracy Envelope combines timer resolution, clock drift, edge jitter, sensor calibration balance, repeatability, and sensor spacing uncertainty. Faster shots and shorter spacing widen the percent.",
+                            )
+                        }
                     }
                 }
                 SensorGraphic(2, vm.sensor2Ready, enabled) { vm.startRetest(2) }
@@ -1024,10 +1036,15 @@ private fun ChannelsCard(vm: ChronoViewModel, enabled: Boolean) {
         Column(Modifier.fillMaxWidth().padding(18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "Channel calibration",
+                    "CHANNEL CALIBRATION",
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f),
                 )
+                InfoDot(
+                    "CHANNEL CALIBRATION",
+                    "Measures each loaded sensor against the empty-port baseline. Closely matched channels reduce timing uncertainty in the GAE calculation.",
+                )
+                Spacer(Modifier.size(8.dp))
                 if (vm.calRunning) {
                     CircularProgressIndicator(
                         color = Amber, modifier = Modifier.size(18.dp), strokeWidth = 2.dp,
@@ -1104,7 +1121,7 @@ private fun NextTestCard(vm: ChronoViewModel, armed: Boolean) {
                 value = vm.pendingLabel,
                 onValueChange = { vm.pendingLabel = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { FieldLabel("Label", "Short name for this shot, such as Test 1 or 20 degree upward angle.") },
+                label = { FieldLabel("LABEL", "Short name for this shot, such as Test 1 or 20 degree upward angle.") },
                 placeholder = { Text("Test 1", color = TextDim) },
                 textStyle = fieldText,
                 singleLine = true,
@@ -1116,8 +1133,8 @@ private fun NextTestCard(vm: ChronoViewModel, armed: Boolean) {
                 value = vm.pendingTool,
                 onValueChange = { vm.pendingTool = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { FieldLabel("Disruptor Type/Model", "Manufacturer and model or locally used identifier for the disruptor.") },
-                placeholder = { Text("PAN BK40, Hydrajet C2, etc.", color = TextDim) },
+                label = { FieldLabel("DISRUPTOR TYPE/MODEL", "Manufacturer and model or locally used identifier for the disruptor.") },
+                placeholder = { Text("Manufacturer/model or local ID", color = TextDim) },
                 textStyle = fieldText,
                 singleLine = true,
             )
@@ -1126,8 +1143,8 @@ private fun NextTestCard(vm: ChronoViewModel, armed: Boolean) {
                 value = vm.pendingDisruptorLoading,
                 onValueChange = { vm.pendingDisruptorLoading = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { FieldLabel("Disruptor loading", "Load or charge configuration used for this shot.") },
-                placeholder = { Text("charge/load configuration", color = TextDim) },
+                label = { FieldLabel("DISRUPTOR LOADING", "Load or charge configuration used for this shot.") },
+                placeholder = { Text("BK40, C2, water load, etc.", color = TextDim) },
                 textStyle = fieldText,
                 singleLine = true,
             )
@@ -1136,7 +1153,7 @@ private fun NextTestCard(vm: ChronoViewModel, armed: Boolean) {
                 value = vm.pendingProjectileType,
                 onValueChange = { vm.pendingProjectileType = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { FieldLabel("Projectile Type", "Material launched by the disruptor. Water is the default.") },
+                label = { FieldLabel("PROJECTILE TYPE", "Material launched by the disruptor. Water is the default.") },
                 placeholder = { Text("Water", color = TextDim) },
                 textStyle = fieldText,
                 singleLine = true,
@@ -1146,7 +1163,7 @@ private fun NextTestCard(vm: ChronoViewModel, armed: Boolean) {
                 value = vm.pendingTarget,
                 onValueChange = { vm.pendingTarget = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { FieldLabel("Target", "Target item or test article being engaged.") },
+                label = { FieldLabel("TARGET", "Target item or test article being engaged.") },
                 placeholder = { Text("Ammo Can etc.", color = TextDim) },
                 textStyle = fieldText,
                 singleLine = true,
@@ -1156,8 +1173,8 @@ private fun NextTestCard(vm: ChronoViewModel, armed: Boolean) {
                 value = vm.pendingTargetDistVal,
                 onValueChange = { vm.pendingTargetDistVal = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { FieldLabel("Stand-Off Distance", "Distance from the disruptor muzzle/reference point to the target.") },
-                placeholder = { Text("25", color = TextDim) },
+                label = { FieldLabel("STAND-OFF DISTANCE", "Distance from the disruptor muzzle/reference point to the target.") },
+                placeholder = { Text("18", color = TextDim) },
                 textStyle = fieldText,
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -1391,27 +1408,21 @@ private fun ResultCard(
 private val EDIT_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
 @Composable
-private fun FieldLabel(label: String, help: String? = null) {
+private fun InfoDot(title: String, help: String, modifier: Modifier = Modifier) {
     var open by remember { mutableStateOf(false) }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(label)
-        if (help != null) {
-            Spacer(Modifier.size(6.dp))
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .size(18.dp)
-                    .border(1.dp, Teal, RoundedCornerShape(9.dp))
-                    .clickable { open = true },
-            ) {
-                Text("i", color = Teal, fontSize = 12.sp, textAlign = TextAlign.Center)
-            }
-        }
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .size(18.dp)
+            .border(1.dp, Teal, RoundedCornerShape(9.dp))
+            .clickable { open = true },
+    ) {
+        Text("i", color = Teal, fontSize = 12.sp, textAlign = TextAlign.Center)
     }
-    if (open && help != null) {
+    if (open) {
         AlertDialog(
             onDismissRequest = { open = false },
-            title = { Text(label) },
+            title = { Text(title) },
             text = {
                 Text(
                     help,
@@ -1423,6 +1434,17 @@ private fun FieldLabel(label: String, help: String? = null) {
                 TextButton(onClick = { open = false }) { Text("OK") }
             },
         )
+    }
+}
+
+@Composable
+private fun FieldLabel(label: String, help: String? = null) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label)
+        if (help != null) {
+            Spacer(Modifier.size(6.dp))
+            InfoDot(label, help)
+        }
     }
 }
 
@@ -1488,7 +1510,7 @@ private fun DateTimeField(
     OutlinedTextField(
         value = field,
         onValueChange = onChange,
-        label = { FieldLabel("Date & time", "Shot date and local time used in the log and export.") },
+        label = { FieldLabel("DATE & TIME", "Shot date and local time used in the log and export.") },
         placeholder = { Text("tap to fill current time", color = TextDim) },
         textStyle = MaterialTheme.typography.bodyMedium,
         singleLine = true,
@@ -1542,7 +1564,7 @@ private fun ReadOnlyLogValue(label: String, value: String) {
 @Composable
 private fun PassFailSelector(value: String, onChange: (String) -> Unit) {
     ChoiceSelector(
-        label = "Pass/Fail",
+        label = "PASS/FAIL",
         value = value,
         options = listOf("Pass", "Fail"),
         help = "Primary success metric for the shot. Use Pass when the shot met the intended test objective.",
@@ -1553,7 +1575,7 @@ private fun PassFailSelector(value: String, onChange: (String) -> Unit) {
 @Composable
 private fun ShotTypeSelector(value: String, onChange: (String) -> Unit) {
     ChoiceSelector(
-        label = "Shot Type",
+        label = "SHOT TYPE",
         value = value.ifBlank { "Standard" },
         options = listOf("Standard", "Experimental"),
         help = "Standard means the shot follows FBI or manufacturer guidance. Experimental means any setup outside those recommendations.",
@@ -1629,7 +1651,7 @@ private fun EditResultDialog(
                     val velocityText = if (result.metersPerSecond > 0)
                         "%.1f ft/s".format(result.feetPerSecond) else "Not recorded"
                     ReadOnlyLogValue("Velocity", velocityText)
-                    ReadOnlyLogValue("Sensor spacing", "%.3f in".format(spacingIn))
+                    ReadOnlyLogValue("SENSOR SPACING", "%.3f in".format(spacingIn))
                     ReadOnlyLogValue("Split time", result.splitTimeText())
                     if (result.deviceSerial.isNotBlank()) {
                         ReadOnlyLogValue("MCU serial", result.deviceSerial)
@@ -1639,7 +1661,7 @@ private fun EditResultDialog(
                 OutlinedTextField(
                     value = label,
                     onValueChange = { label = it },
-                    label = { FieldLabel("Label", "Short name for this shot.") },
+                    label = { FieldLabel("LABEL", "Short name for this shot.") },
                     placeholder = { Text("Test 1", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
@@ -1651,8 +1673,8 @@ private fun EditResultDialog(
                 OutlinedTextField(
                     value = tool,
                     onValueChange = { tool = it },
-                    label = { FieldLabel("Disruptor Type/Model", "Manufacturer and model or locally used identifier for the disruptor.") },
-                    placeholder = { Text("PAN BK40, Hydrajet C2, etc.", color = TextDim) },
+                    label = { FieldLabel("DISRUPTOR TYPE/MODEL", "Manufacturer and model or locally used identifier for the disruptor.") },
+                    placeholder = { Text("Manufacturer/model or local ID", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -1661,8 +1683,8 @@ private fun EditResultDialog(
                 OutlinedTextField(
                     value = disruptorLoading,
                     onValueChange = { disruptorLoading = it },
-                    label = { FieldLabel("Disruptor loading", "Load or charge configuration used for this shot.") },
-                    placeholder = { Text("charge/load configuration", color = TextDim) },
+                    label = { FieldLabel("DISRUPTOR LOADING", "Load or charge configuration used for this shot.") },
+                    placeholder = { Text("BK40, C2, water load, etc.", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -1671,7 +1693,7 @@ private fun EditResultDialog(
                 OutlinedTextField(
                     value = projectileType,
                     onValueChange = { projectileType = it },
-                    label = { FieldLabel("Projectile Type", "Material launched by the disruptor. Water is the default.") },
+                    label = { FieldLabel("PROJECTILE TYPE", "Material launched by the disruptor. Water is the default.") },
                     placeholder = { Text("Water", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
@@ -1681,7 +1703,7 @@ private fun EditResultDialog(
                 OutlinedTextField(
                     value = target,
                     onValueChange = { target = it },
-                    label = { FieldLabel("Target", "Target item or test article being engaged.") },
+                    label = { FieldLabel("TARGET", "Target item or test article being engaged.") },
                     placeholder = { Text("Ammo Can etc.", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
@@ -1691,7 +1713,7 @@ private fun EditResultDialog(
                 OutlinedTextField(
                     value = tdVal,
                     onValueChange = { tdVal = it },
-                    label = { FieldLabel("Stand-Off Distance", "Distance from the disruptor muzzle/reference point to the target.") },
+                    label = { FieldLabel("STAND-OFF DISTANCE", "Distance from the disruptor muzzle/reference point to the target.") },
                     textStyle = fieldText,
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -1704,7 +1726,7 @@ private fun EditResultDialog(
                 OutlinedTextField(
                     value = specialNotes,
                     onValueChange = { specialNotes = it },
-                    label = { FieldLabel("Special Notes", "Anything useful for later review: setup deviations, target condition, observed effect, or photo context.") },
+                    label = { FieldLabel("SPECIAL NOTES", "Anything useful for later review: setup deviations, target condition, observed effect, or photo context.") },
                     placeholder = { Text("penetration, depth, dent etc.", color = TextDim) },
                     textStyle = fieldText,
                     modifier = Modifier
@@ -1732,8 +1754,9 @@ private fun EditResultDialog(
                             PhotoThumbnail(
                                 uri = uri,
                                 selected = selectedPhoto == uri,
+                                selectionMode = selectedPhoto != null,
                                 onOpen = { onOpenPhoto(uri) },
-                                onSelect = { selectedPhoto = uri },
+                                onSelect = { selectedPhoto = if (selectedPhoto == uri) null else uri },
                             )
                         }
                     }
@@ -1832,7 +1855,7 @@ private fun ManualEntryDialog(
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text(
-                    "Log a shot without a connected chronograph.",
+                    "Log a shot without a connected device.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = TextDim,
                     textAlign = TextAlign.Center,
@@ -1842,7 +1865,7 @@ private fun ManualEntryDialog(
                 OutlinedTextField(
                     value = velText,
                     onValueChange = { velText = it },
-                    label = { FieldLabel("Velocity (optional)", "Known or manually measured projectile velocity. Leave blank for notes/photos only.") },
+                    label = { FieldLabel("VELOCITY (OPTIONAL)", "Known or manually measured projectile velocity. Leave blank for notes/photos only.") },
                     textStyle = fieldText,
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -1868,7 +1891,7 @@ private fun ManualEntryDialog(
                 OutlinedTextField(
                     value = label,
                     onValueChange = { label = it },
-                    label = { FieldLabel("Label", "Short name for this shot.") },
+                    label = { FieldLabel("LABEL", "Short name for this shot.") },
                     placeholder = { Text("Test 1", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
@@ -1880,8 +1903,8 @@ private fun ManualEntryDialog(
                 OutlinedTextField(
                     value = tool,
                     onValueChange = { tool = it },
-                    label = { FieldLabel("Disruptor Type/Model", "Manufacturer and model or locally used identifier for the disruptor.") },
-                    placeholder = { Text("PAN BK40, Hydrajet C2, etc.", color = TextDim) },
+                    label = { FieldLabel("DISRUPTOR TYPE/MODEL", "Manufacturer and model or locally used identifier for the disruptor.") },
+                    placeholder = { Text("Manufacturer/model or local ID", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -1890,8 +1913,8 @@ private fun ManualEntryDialog(
                 OutlinedTextField(
                     value = disruptorLoading,
                     onValueChange = { disruptorLoading = it },
-                    label = { FieldLabel("Disruptor loading", "Load or charge configuration used for this shot.") },
-                    placeholder = { Text("charge/load configuration", color = TextDim) },
+                    label = { FieldLabel("DISRUPTOR LOADING", "Load or charge configuration used for this shot.") },
+                    placeholder = { Text("BK40, C2, water load, etc.", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -1900,7 +1923,7 @@ private fun ManualEntryDialog(
                 OutlinedTextField(
                     value = projectileType,
                     onValueChange = { projectileType = it },
-                    label = { FieldLabel("Projectile Type", "Material launched by the disruptor. Water is the default.") },
+                    label = { FieldLabel("PROJECTILE TYPE", "Material launched by the disruptor. Water is the default.") },
                     placeholder = { Text("Water", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
@@ -1910,7 +1933,7 @@ private fun ManualEntryDialog(
                 OutlinedTextField(
                     value = target,
                     onValueChange = { target = it },
-                    label = { FieldLabel("Target", "Target item or test article being engaged.") },
+                    label = { FieldLabel("TARGET", "Target item or test article being engaged.") },
                     placeholder = { Text("Ammo Can etc.", color = TextDim) },
                     textStyle = fieldText,
                     singleLine = true,
@@ -1920,7 +1943,7 @@ private fun ManualEntryDialog(
                 OutlinedTextField(
                     value = tdVal,
                     onValueChange = { tdVal = it },
-                    label = { FieldLabel("Stand-Off Distance", "Distance from the disruptor muzzle/reference point to the target.") },
+                    label = { FieldLabel("STAND-OFF DISTANCE", "Distance from the disruptor muzzle/reference point to the target.") },
                     textStyle = fieldText,
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -1933,7 +1956,7 @@ private fun ManualEntryDialog(
                 OutlinedTextField(
                     value = specialNotes,
                     onValueChange = { specialNotes = it },
-                    label = { FieldLabel("Special Notes", "Anything useful for later review: setup deviations, target condition, observed effect, or photo context.") },
+                    label = { FieldLabel("SPECIAL NOTES", "Anything useful for later review: setup deviations, target condition, observed effect, or photo context.") },
                     placeholder = { Text("penetration, depth, dent etc.", color = TextDim) },
                     textStyle = fieldText,
                     modifier = Modifier.fillMaxWidth(),

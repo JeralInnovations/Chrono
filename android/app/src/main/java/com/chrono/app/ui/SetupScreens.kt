@@ -422,7 +422,7 @@ fun DistanceScreen(vm: ChronoViewModel) {
         Spacer(Modifier.height(20.dp))
         Text("SETUP  4/4", style = MaterialTheme.typography.labelSmall, color = TextDim)
         Spacer(Modifier.height(48.dp))
-        Text("Sensor spacing", style = MaterialTheme.typography.headlineMedium)
+        Text("SENSOR SPACING", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(10.dp))
         Text(
             "Measure START sensor to STOP sensor.",
@@ -437,7 +437,7 @@ fun DistanceScreen(vm: ChronoViewModel) {
                 value = text,
                 onValueChange = { text = it },
                 modifier = Modifier.weight(1f),
-                label = { SetupFieldLabel("Distance", "Exact START-to-STOP sensor spacing used for velocity calculations.") },
+                label = { SetupFieldLabel("DISTANCE", "Exact START-to-STOP sensor spacing used for velocity and GAE calculations.") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
             )
@@ -460,6 +460,13 @@ fun DistanceScreen(vm: ChronoViewModel) {
                 }
             }
         }
+        Spacer(Modifier.height(18.dp))
+        Text(
+            "This distance is used for velocity and GAE. A small spacing error changes every shot measurement.",
+            style = MaterialTheme.typography.bodyLarge,
+            color = TextDim,
+            textAlign = TextAlign.Center,
+        )
 
         Spacer(Modifier.weight(1f))
         Button(

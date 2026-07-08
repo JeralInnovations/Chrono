@@ -44,28 +44,28 @@ private val ChronoType = Typography(
     displayLarge = TextStyle(
         fontFamily = FontFamily.Monospace,
         fontWeight = FontWeight.Bold,
-        fontSize = 52.sp,
+        fontSize = 56.sp,
         letterSpacing = 0.sp,
     ),
     headlineMedium = TextStyle(
         fontWeight = FontWeight.SemiBold,
-        fontSize = 26.sp,
+        fontSize = 29.sp,
     ),
     titleMedium = TextStyle(
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 21.sp,
+        letterSpacing = 0.sp,
+    ),
+    bodyLarge = TextStyle(fontSize = 19.sp, lineHeight = 28.sp),
+    bodyMedium = TextStyle(fontSize = 17.sp, lineHeight = 25.sp),
+    labelLarge = TextStyle(
         fontWeight = FontWeight.SemiBold,
         fontSize = 18.sp,
         letterSpacing = 0.sp,
     ),
-    bodyLarge = TextStyle(fontSize = 17.sp, lineHeight = 25.sp),
-    bodyMedium = TextStyle(fontSize = 15.sp, lineHeight = 22.sp),
-    labelLarge = TextStyle(
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 15.sp,
-        letterSpacing = 0.sp,
-    ),
     labelSmall = TextStyle(
         fontWeight = FontWeight.Medium,
-        fontSize = 12.sp,
+        fontSize = 14.sp,
         letterSpacing = 0.sp,
     ),
 )
