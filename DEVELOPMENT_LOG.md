@@ -10,3 +10,4 @@
 - 2026-07-09: Added high port-baseline capacitance warnings and calibration cancel paths back to the connected dashboard.
 - 2026-07-09: Updated port baseline readings to show capacitance with centered port labels and prevented shot-type buttons from wrapping.
 - 2026-07-09: Fixed unit formatting so whole-number capacitance and distance values keep significant trailing zeros.
+- 2026-07-09: Compacted the dashboard header for narrow phones and widened shot-type button text handling.

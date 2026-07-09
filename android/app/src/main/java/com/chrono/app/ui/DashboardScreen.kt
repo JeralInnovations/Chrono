@@ -13,12 +13,15 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -841,27 +844,59 @@ private fun FullLogDialog(
 
 @Composable
 private fun TopBar(vm: ChronoViewModel, connState: ConnState, deviceStatus: DeviceStatus?) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                "JERAL INNOVATIONS",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextDim,
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("CHRONO LOGGER", style = MaterialTheme.typography.headlineMedium, color = Amber)
-                if (vm.isSimulation) {
-                    Spacer(Modifier.size(10.dp))
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val compact = maxWidth < 390.dp
+        val titleStyle = MaterialTheme.typography.headlineMedium.copy(
+            fontSize = if (compact) 24.sp else 29.sp,
+            lineHeight = if (compact) 28.sp else 34.sp,
+        )
+        val statusStyle = MaterialTheme.typography.bodyMedium.copy(
+            fontSize = if (compact) 15.sp else 17.sp,
+            lineHeight = if (compact) 20.sp else 23.sp,
+        )
+
+        Column(Modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                Column(Modifier.weight(1f)) {
                     Text(
-                        "SIM",
+                        "JERAL INNOVATIONS",
                         style = MaterialTheme.typography.labelSmall,
-                        color = Teal,
-                        modifier = Modifier
-                            .background(Teal.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
-                            .padding(horizontal = 7.dp, vertical = 3.dp),
+                        color = TextDim,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "CHRONO LOGGER",
+                            style = titleStyle,
+                            color = Amber,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (vm.isSimulation) {
+                            Spacer(Modifier.size(8.dp))
+                            Text(
+                                "SIM",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Teal,
+                                modifier = Modifier
+                                    .background(Teal.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 7.dp, vertical = 3.dp),
+                            )
+                        }
+                    }
+                }
+                TextButton(
+                    onClick = { vm.disconnectOrExit() },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    modifier = Modifier.heightIn(min = 36.dp),
+                ) {
+                    Text(
+                        if (connState == ConnState.DISCONNECTED) "Exit" else "Disconnect",
+                        style = statusStyle,
+                        color = TextDim,
                     )
                 }
             }
+            Spacer(Modifier.height(if (compact) 6.dp else 8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val (icon, tint, label) = when (connState) {
                     ConnState.CONNECTED ->
@@ -872,8 +907,8 @@ private fun TopBar(vm: ChronoViewModel, connState: ConnState, deviceStatus: Devi
                 }
                 Icon(icon, null, tint = tint, modifier = Modifier.size(14.dp))
                 Spacer(Modifier.size(5.dp))
-                Text(label, style = MaterialTheme.typography.bodyMedium, color = tint)
-                Spacer(Modifier.size(14.dp))
+                Text(label, style = statusStyle, color = tint, maxLines = 1)
+                Spacer(Modifier.size(if (compact) 10.dp else 14.dp))
                 val timeOk = deviceStatus?.timeValid == true
                 Icon(
                     Icons.Filled.AccessTime, null,
@@ -884,33 +919,30 @@ private fun TopBar(vm: ChronoViewModel, connState: ConnState, deviceStatus: Devi
                 )
                 Spacer(Modifier.size(5.dp))
                 Text(
-                    if (timeOk) "Clock synced" else "Clock not set — tap to sync",
-                    style = MaterialTheme.typography.bodyMedium,
+                    if (timeOk) "Clock synced" else "Clock not set",
+                    style = statusStyle,
                     color = if (timeOk) Teal else TextDim,
+                    maxLines = 1,
                     modifier = Modifier.clickable { vm.syncTime() },
                 )
-                BatteryIndicator(deviceStatus)
+                BatteryIndicator(deviceStatus, compact = compact)
             }
             vm.projectName?.let {
+                Spacer(Modifier.height(4.dp))
                 Text(
-                    "${vm.session.pathLabel} — tap to open",
+                    "${vm.session.pathLabel} - tap to open",
                     style = MaterialTheme.typography.labelSmall,
                     color = TextDim,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.clickable { vm.openDataFolder() },
                 )
             }
         }
-        TextButton(onClick = { vm.disconnectOrExit() }) {
-            Text(
-                if (connState == ConnState.DISCONNECTED) "Exit" else "Disconnect",
-                color = TextDim,
-            )
-        }
     }
 }
-
 @Composable
-private fun BatteryIndicator(deviceStatus: DeviceStatus?) {
+private fun BatteryIndicator(deviceStatus: DeviceStatus?, compact: Boolean = false) {
     val percent = deviceStatus?.batteryPercent?.coerceIn(0, 100)
     val mv = deviceStatus?.batteryMv
     if (percent == null && mv == null) return
@@ -928,8 +960,8 @@ private fun BatteryIndicator(deviceStatus: DeviceStatus?) {
         }
     }
 
-    Spacer(Modifier.size(14.dp))
-    Canvas(modifier = Modifier.size(width = 28.dp, height = 14.dp)) {
+    Spacer(Modifier.size(if (compact) 8.dp else 14.dp))
+    Canvas(modifier = Modifier.size(width = if (compact) 22.dp else 28.dp, height = 14.dp)) {
         val stroke = 1.4.dp.toPx()
         val bodyWidth = size.width - 4.dp.toPx()
         drawRoundRect(
@@ -956,7 +988,12 @@ private fun BatteryIndicator(deviceStatus: DeviceStatus?) {
         )
     }
     Spacer(Modifier.size(5.dp))
-    Text(label, style = MaterialTheme.typography.bodyMedium, color = tint)
+    Text(
+        label,
+        style = MaterialTheme.typography.bodyMedium.copy(fontSize = if (compact) 15.sp else 17.sp),
+        color = tint,
+        maxLines = 1,
+    )
 }
 
 private fun batteryPercentFromMv(mv: Int): Int {
@@ -1544,21 +1581,29 @@ private fun ChoiceSelector(
         options.forEach { option ->
             val selected = value.equals(option, ignoreCase = true)
             if (selected) {
-                Button(onClick = { onChange(option) }, modifier = Modifier.weight(1f)) {
+                Button(
+                    onClick = { onChange(option) },
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
+                ) {
                     Text(
                         option,
                         textAlign = TextAlign.Center,
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
             } else {
-                OutlinedButton(onClick = { onChange(option) }, modifier = Modifier.weight(1f)) {
+                OutlinedButton(
+                    onClick = { onChange(option) },
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
+                ) {
                     Text(
                         option,
                         textAlign = TextAlign.Center,
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
