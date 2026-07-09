@@ -334,7 +334,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
         }
     }
 
-    // Sensor-attach flow: fit wire -> capacitance check -> tap test.
+    // Sensor-attach flow: fit wire -> RC signature check -> tap test.
     // The input is deliberately NOT armed until the tap step, so movement
     // during placement can't trigger anything.
     vm.retestSensor?.let { sensor ->
@@ -359,7 +359,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                                         strokeWidth = 2.dp,
                                     )
                                     Spacer(Modifier.size(8.dp))
-                                    Text("Checking capacitance…", color = TextDim)
+                                    Text("Checking RC signature...", color = TextDim)
                                 }
                             } else {
                                 val load = vm.channelLoadNs(sensor)
@@ -371,13 +371,13 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                                         style = MaterialTheme.typography.bodyMedium,
                                     )
                                     load > 250 -> Text(
-                                        "Sensor detected: +%.2f us over baseline (about %s)."
-                                            .format(load / 1000.0, vm.capacitanceText(load)),
+                                        "Sensor detected: RC delay +%s over baseline."
+                                            .format(vm.rcDelayText(load)),
                                         color = Good,
                                         style = MaterialTheme.typography.bodyMedium,
                                     )
                                     else -> Text(
-                                        "No capacitance increase. Check clips and re-measure.",
+                                        "No RC signature increase. Check clips and re-measure.",
                                         color = Amber,
                                         style = MaterialTheme.typography.bodyMedium,
                                     )
@@ -1149,6 +1149,7 @@ private fun ChannelsCard(vm: ChronoViewModel, enabled: Boolean) {
     val load1 = vm.channelLoadNs(1)
     val load2 = vm.channelLoadNs(2)
     val mismatch = vm.channelMismatchNs()
+    val mismatchPercent = vm.channelMismatchPercent()
     val hasBaseline = vm.calData.containsKey("b1") && vm.calData.containsKey("b2")
 
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
@@ -1161,7 +1162,7 @@ private fun ChannelsCard(vm: ChronoViewModel, enabled: Boolean) {
                 )
                 InfoDot(
                     "CHANNEL CALIBRATION",
-                    "Measures each loaded sensor against the empty-port baseline. Closely matched channels reduce timing uncertainty in the GAE calculation.",
+                    "Measures each loaded sensor's RC trigger delay against the empty-port baseline. Closely matched RC signatures reduce timing uncertainty in the GAE calculation.",
                 )
                 Spacer(Modifier.size(8.dp))
                 if (vm.calRunning) {
@@ -1179,8 +1180,8 @@ private fun ChannelsCard(vm: ChronoViewModel, enabled: Boolean) {
             for ((ch, load) in listOf(1 to load1, 2 to load2)) {
                 Text(
                     if (load != null)
-                        "Port $ch load:  +%.2f us  (about %s)".format(load / 1000.0, vm.capacitanceText(load))
-                    else "Port $ch load:  — not measured",
+                        "Port $ch RC delay: +${vm.rcDelayText(load)} over baseline"
+                    else "Port $ch RC delay: not measured",
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextDim,
                 )
@@ -1189,7 +1190,7 @@ private fun ChannelsCard(vm: ChronoViewModel, enabled: Boolean) {
             Spacer(Modifier.height(6.dp))
             when {
                 !hasBaseline -> Text(
-                    "No baseline captured — redo setup with empty ports to enable.",
+                    "No baseline captured - redo setup with empty ports to enable.",
                     style = MaterialTheme.typography.bodyMedium, color = TextDim,
                 )
                 mismatch == null -> Text(
@@ -1197,12 +1198,13 @@ private fun ChannelsCard(vm: ChronoViewModel, enabled: Boolean) {
                     style = MaterialTheme.typography.bodyMedium, color = TextDim,
                 )
                 mismatch < 600 -> Text(
-                    "Channels matched  (Δ $mismatch ns — timing impact negligible)",
+                    "Channels matched (delta ${vm.rcDelayText(mismatch)} - timing impact negligible)",
                     style = MaterialTheme.typography.bodyMedium, color = Good,
                 )
                 else -> Text(
-                    "Channel mismatch delta $mismatch ns (about ${vm.capacitanceText(mismatch)}) - " +
-                        "check that both cables are the same length and type.",
+                    "Channel RC mismatch: delta ${vm.rcDelayText(mismatch)}" +
+                        (mismatchPercent?.let { " (${String.format("%.1f", it)}% of average)" } ?: "") +
+                        " - match cable/sensor assemblies when possible.",
                     style = MaterialTheme.typography.bodyMedium, color = Amber,
                 )
             }

@@ -33,9 +33,6 @@ enum class Screen { CONNECT, BASELINE, SENSOR1, SENSOR2, DISTANCE, DASHBOARD }
 
 enum class CalPhase { BARE, LOADED }
 
-// Empirical RC conversion from Fluke-checked 30.0 nF and 34.2 nF loads.
-private const val CAP_NS_PER_PF = 8.855
-
 /** Stored summary of one calibration sweep (times in ns). */
 data class CalEntry(
     val medianNs: Long,
@@ -650,19 +647,19 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         return abs(a - b)
     }
 
-    fun capacitanceText(loadNs: Long): String {
-        val pf = loadNs / CAP_NS_PER_PF
+    fun rcDelayText(ns: Long): String {
+        val absNs = abs(ns)
         val (value, unit) = when {
-            pf >= 1_000_000.0 -> pf / 1_000_000.0 to "uF"
-            pf >= 1_000.0 -> pf / 1_000.0 to "nF"
-            else -> pf to "pF"
+            absNs >= 1_000_000L -> ns / 1_000_000.0 to "ms"
+            absNs >= 1_000L -> ns / 1_000.0 to "us"
+            else -> ns.toDouble() to "ns"
         }
         val text = when {
             value >= 100.0 -> "%.0f".format(value)
             value >= 10.0 -> "%.1f".format(value)
             else -> "%.2f".format(value)
         }.trimFractionZeros()
-        return "$text$unit"
+        return "$text $unit"
     }
 
     private fun String.trimFractionZeros(): String =
@@ -671,8 +668,16 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     fun baselineTooHigh(entry: CalEntry?): Boolean =
         entry?.isUsable == true && entry.medianNs >= 3_000
 
-    fun baselineCapacitanceText(entry: CalEntry?): String =
-        entry?.let { capacitanceText(it.medianNs) } ?: ""
+    fun baselineSignatureText(entry: CalEntry?): String =
+        entry?.let { rcDelayText(it.medianNs) } ?: ""
+
+    fun channelMismatchPercent(): Double? {
+        val a = channelLoadNs(1) ?: return null
+        val b = channelLoadNs(2) ?: return null
+        val avg = (a + b) / 2.0
+        if (avg <= 0.0) return null
+        return abs(a - b) / avg * 100.0
+    }
 
     /**
      * Conservative accuracy envelope for one result, as a percent of velocity.
@@ -779,7 +784,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * Opens the sensor-attach dialog. Deliberately does NOT start listening on
      * the input yet: the wire is first fitted (attach), then verified by a
-     * capacitance measurement, and only then armed for the tap test — so
+     * RC signature measurement, and only then armed for the tap test — so
      * movement during placement can't trigger anything.
      */
     fun startRetest(sensor: Int) {

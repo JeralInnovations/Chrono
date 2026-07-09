@@ -158,8 +158,8 @@ fun BaselineScreen(vm: ChronoViewModel, connState: ConnState) {
     val baselineDone = b1 != null && b2 != null
     val baselineWarning = baselineDone && (b1?.isUsable != true || b2?.isUsable != true)
     val highBaselinePorts = listOfNotNull(
-        b1?.takeIf { vm.baselineTooHigh(it) }?.let { "Port 1: ${vm.baselineCapacitanceText(it)}" },
-        b2?.takeIf { vm.baselineTooHigh(it) }?.let { "Port 2: ${vm.baselineCapacitanceText(it)}" },
+        b1?.takeIf { vm.baselineTooHigh(it) }?.let { "Port 1: ${vm.baselineSignatureText(it)}" },
+        b2?.takeIf { vm.baselineTooHigh(it) }?.let { "Port 2: ${vm.baselineSignatureText(it)}" },
     )
 
     Column(
@@ -196,13 +196,13 @@ fun BaselineScreen(vm: ChronoViewModel, connState: ConnState) {
         }
         Spacer(Modifier.height(20.dp))
 
-        CalRow("Port 1", vm.calData["b1"], vm::capacitanceText)
+        CalRow("Port 1", vm.calData["b1"], vm::rcDelayText)
         Spacer(Modifier.height(8.dp))
-        CalRow("Port 2", vm.calData["b2"], vm::capacitanceText)
+        CalRow("Port 2", vm.calData["b2"], vm::rcDelayText)
         if (highBaselinePorts.isNotEmpty()) {
             Spacer(Modifier.height(14.dp))
             Text(
-                "Warning: baseline capacitance appears too high to be the port alone. " +
+                "Warning: empty-port RC delay appears too high to be the port alone. " +
                     "Limit is 3 us or above; measured ${highBaselinePorts.joinToString(", ")}. " +
                     "Remove anything connected and run baseline again.",
                 color = Bad,
@@ -213,7 +213,7 @@ fun BaselineScreen(vm: ChronoViewModel, connState: ConnState) {
         if (baselineWarning) {
             Spacer(Modifier.height(14.dp))
             Text(
-                "Baseline failed. Tap tests can continue; capacitance checks will be limited.",
+                "Baseline failed. Tap tests can continue; RC checks will be limited.",
                 color = Amber,
                 style = MaterialTheme.typography.bodyLarge,
                 textAlign = TextAlign.Center,
@@ -236,7 +236,7 @@ fun BaselineScreen(vm: ChronoViewModel, connState: ConnState) {
 }
 
 @Composable
-private fun CalRow(label: String, entry: com.chrono.app.CalEntry?, capacitanceText: (Long) -> String) {
+private fun CalRow(label: String, entry: com.chrono.app.CalEntry?, rcDelayText: (Long) -> String) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -247,9 +247,8 @@ private fun CalRow(label: String, entry: com.chrono.app.CalEntry?, capacitanceTe
             entry == null -> "-"
             !entry.isUsable && entry.status == 2 -> "No usable samples - n=${entry.samples}"
             !entry.isUsable -> "Incomplete - n=${entry.samples}"
-            else -> "%.2f us  -  %s  -  sigma %d ns".format(
-                entry.medianNs / 1000.0,
-                capacitanceText(entry.medianNs),
+            else -> "%s  -  sigma %d ns".format(
+                rcDelayText(entry.medianNs),
                 entry.stddevNs,
             )
         }
@@ -273,7 +272,7 @@ fun SensorSetupScreen(
 ) {
     // Three explicit, user-driven steps:
     //   attach   — plug the sensor in (nothing armed)
-    //   measure  — capacitance check vs the bare-port baseline
+    //   measure  — RC signature check vs the bare-port baseline
     //   tap      — impact/voltage-rise test (a separate check)
     var step by remember(sensor) { mutableStateOf("attach") }
     var wasVerified by remember(sensor) { mutableStateOf(false) }
@@ -321,7 +320,7 @@ fun SensorSetupScreen(
                     modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp),
                 ) {
                     Text(
-                        "Sensor plugged in — check capacitance",
+                        "Sensor plugged in - check RC signature",
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -335,12 +334,12 @@ fun SensorSetupScreen(
 
             "measure" -> {
                 Text(
-                    "Capacitance check",
+                    "RC signature check",
                     style = MaterialTheme.typography.headlineMedium,
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Sensor and cable should add capacitance over baseline.",
+                    "Sensor and cable should add RC delay over baseline.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = TextDim,
                     textAlign = TextAlign.Center,
@@ -349,7 +348,7 @@ fun SensorSetupScreen(
                 if (vm.calRunning) {
                     CircularProgressIndicator(color = Amber, modifier = Modifier.size(28.dp))
                     Spacer(Modifier.height(10.dp))
-                    Text("Checking capacitance…", color = TextDim)
+                    Text("Checking RC signature...", color = TextDim)
                 } else when {
                     loadEntry == null -> Text(
                         "No reading yet. Re-measure or run the tap test.",
@@ -357,7 +356,7 @@ fun SensorSetupScreen(
                         style = MaterialTheme.typography.bodyLarge,
                     )
                     loadEntry.isUsable != true -> Text(
-                        "No usable capacitance samples. Check leads or run the tap test.",
+                        "No usable RC samples. Check leads or run the tap test.",
                         color = Amber,
                         style = MaterialTheme.typography.bodyLarge,
                         textAlign = TextAlign.Center,
@@ -372,16 +371,14 @@ fun SensorSetupScreen(
                         Icon(Icons.Filled.CheckCircle, null, tint = Good, modifier = Modifier.size(48.dp))
                         Spacer(Modifier.height(10.dp))
                         Text(
-                            "Sensor detected: +%.2f us over baseline (about %s added).".format(
-                                loadNs / 1000.0, vm.capacitanceText(loadNs)
-                            ),
+                            "Sensor detected: RC delay +%s over baseline.".format(vm.rcDelayText(loadNs)),
                             color = Good,
                             style = MaterialTheme.typography.bodyLarge,
                             textAlign = TextAlign.Center,
                         )
                     }
                     else -> Text(
-                        "No capacitance increase. Check clips or run the tap test.",
+                        "No RC signature increase. Check clips or run the tap test.",
                         color = Amber,
                         style = MaterialTheme.typography.bodyLarge,
                         textAlign = TextAlign.Center,
