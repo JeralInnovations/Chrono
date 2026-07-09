@@ -33,6 +33,9 @@ enum class Screen { CONNECT, BASELINE, SENSOR1, SENSOR2, DISTANCE, DASHBOARD }
 
 enum class CalPhase { BARE, LOADED }
 
+// Empirical RC conversion from Fluke-checked 30.0 nF and 34.2 nF loads.
+private const val CAP_NS_PER_PF = 8.855
+
 /** Stored summary of one calibration sweep (times in ns). */
 data class CalEntry(
     val medianNs: Long,
@@ -648,7 +651,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun capacitanceText(loadNs: Long): String {
-        val pf = loadNs / 12.0
+        val pf = loadNs / CAP_NS_PER_PF
         val (value, unit) = when {
             pf >= 1_000_000.0 -> pf / 1_000_000.0 to "uF"
             pf >= 1_000.0 -> pf / 1_000.0 to "nF"
