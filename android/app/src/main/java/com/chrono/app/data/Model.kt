@@ -77,7 +77,7 @@ private fun formatWholeish(value: Double, unit: String): String {
         value >= 100 -> String.format(Locale.US, "%.0f", value)
         value >= 10 -> String.format(Locale.US, "%.1f", value)
         else -> String.format(Locale.US, "%.2f", value)
-    }.trimEnd('0').trimEnd('.')
+    }.let { if (it.contains('.')) it.trimEnd('0').trimEnd('.') else it }
     return "$text$unit"
 }
 

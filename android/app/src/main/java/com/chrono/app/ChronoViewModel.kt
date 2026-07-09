@@ -658,9 +658,12 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
             value >= 100.0 -> "%.0f".format(value)
             value >= 10.0 -> "%.1f".format(value)
             else -> "%.2f".format(value)
-        }.trimEnd('0').trimEnd('.')
+        }.trimFractionZeros()
         return "$text$unit"
     }
+
+    private fun String.trimFractionZeros(): String =
+        if (contains('.')) trimEnd('0').trimEnd('.') else this
 
     fun baselineTooHigh(entry: CalEntry?): Boolean =
         entry?.isUsable == true && entry.medianNs >= 3_000

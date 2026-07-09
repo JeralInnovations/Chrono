@@ -9,3 +9,4 @@
 - 2026-07-08: Added device battery voltage reporting, app battery level display, and low-battery warning behavior.
 - 2026-07-09: Added high port-baseline capacitance warnings and calibration cancel paths back to the connected dashboard.
 - 2026-07-09: Updated port baseline readings to show capacitance with centered port labels and prevented shot-type buttons from wrapping.
+- 2026-07-09: Fixed unit formatting so whole-number capacitance and distance values keep significant trailing zeros.
