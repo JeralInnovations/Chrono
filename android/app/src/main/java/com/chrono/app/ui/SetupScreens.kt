@@ -50,6 +50,7 @@ import com.chrono.app.ble.ConnState
 import com.chrono.app.ble.Proto
 import com.chrono.app.data.DistanceUnit
 import com.chrono.app.ui.theme.Amber
+import com.chrono.app.ui.theme.Bad
 import com.chrono.app.ui.theme.Good
 import com.chrono.app.ui.theme.Teal
 import com.chrono.app.ui.theme.TextDim
@@ -156,6 +157,10 @@ fun BaselineScreen(vm: ChronoViewModel, connState: ConnState) {
     val b2 = vm.calData["b2"]
     val baselineDone = b1 != null && b2 != null
     val baselineWarning = baselineDone && (b1?.isUsable != true || b2?.isUsable != true)
+    val highBaselinePorts = listOfNotNull(
+        b1?.takeIf { vm.baselineTooHigh(it) }?.let { "Port 1: ${vm.baselineCapacitanceText(it)}" },
+        b2?.takeIf { vm.baselineTooHigh(it) }?.let { "Port 2: ${vm.baselineCapacitanceText(it)}" },
+    )
 
     Column(
         modifier = Modifier.fillMaxSize().padding(28.dp).verticalScroll(rememberScrollState()),
@@ -194,6 +199,17 @@ fun BaselineScreen(vm: ChronoViewModel, connState: ConnState) {
         CalRow("Port 1", vm.calData["b1"])
         Spacer(Modifier.height(8.dp))
         CalRow("Port 2", vm.calData["b2"])
+        if (highBaselinePorts.isNotEmpty()) {
+            Spacer(Modifier.height(14.dp))
+            Text(
+                "Warning: baseline capacitance appears too high to be the port alone. " +
+                    "Limit is 3 us or above; measured ${highBaselinePorts.joinToString(", ")}. " +
+                    "Remove anything connected and run baseline again.",
+                color = Bad,
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = TextAlign.Center,
+            )
+        }
         if (baselineWarning) {
             Spacer(Modifier.height(14.dp))
             Text(
@@ -206,6 +222,11 @@ fun BaselineScreen(vm: ChronoViewModel, connState: ConnState) {
 
         Spacer(Modifier.weight(1f))
         Spacer(Modifier.height(24.dp))
+        OutlinedButton(
+            onClick = { vm.cancelCalibrationToDashboard() },
+            modifier = Modifier.fillMaxWidth().height(54.dp),
+        ) { Text("Cancel") }
+        Spacer(Modifier.height(10.dp))
         Button(
             onClick = { vm.continueToSensor1() },
             enabled = baselineDone && !vm.calRunning,
@@ -300,6 +321,11 @@ fun SensorSetupScreen(
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = { vm.cancelCalibrationToDashboard() },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp),
+                ) { Text("Cancel") }
             }
 
             "measure" -> {
@@ -358,6 +384,11 @@ fun SensorSetupScreen(
                 }
                 Spacer(Modifier.weight(1f))
                 Spacer(Modifier.height(24.dp))
+                OutlinedButton(
+                    onClick = { vm.cancelCalibrationToDashboard() },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp),
+                ) { Text("Cancel") }
+                Spacer(Modifier.height(10.dp))
                 Row(Modifier.fillMaxWidth()) {
                     OutlinedButton(
                         onClick = { vm.startLoadedCal(sensor) },
@@ -396,6 +427,11 @@ fun SensorSetupScreen(
                 }
                 Spacer(Modifier.weight(1f))
                 Spacer(Modifier.height(24.dp))
+                OutlinedButton(
+                    onClick = { vm.cancelCalibrationToDashboard() },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp),
+                ) { Text("Cancel") }
+                Spacer(Modifier.height(10.dp))
                 Button(
                     onClick = onContinue,
                     enabled = wasVerified,

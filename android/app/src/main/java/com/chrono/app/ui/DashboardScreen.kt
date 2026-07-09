@@ -96,6 +96,7 @@ import com.chrono.app.ui.theme.Good
 import com.chrono.app.ui.theme.PanelHigh
 import com.chrono.app.ui.theme.Teal
 import com.chrono.app.ui.theme.TextDim
+import kotlin.math.roundToInt
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -140,8 +141,13 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
     var promptPhotoPreview by remember { mutableStateOf<android.net.Uri?>(null) }
     var selectedPromptPhoto by remember { mutableStateOf<android.net.Uri?>(null) }
     var selectedSetupPhoto by remember { mutableStateOf<android.net.Uri?>(null) }
+    var dismissedLowBatteryMv by remember { mutableStateOf<Int?>(null) }
     val context = LocalContext.current
     val photoRevision = vm.photoRevision
+    val batteryMv = deviceStatus?.batteryMv
+    val showLowBattery = connState == ConnState.CONNECTED &&
+        deviceStatus?.lowBattery == true &&
+        batteryMv != dismissedLowBatteryMv
 
     // System camera writing straight into the shot folder: no CAMERA permission.
     var pendingPhoto by remember { mutableStateOf<android.net.Uri?>(null) }
@@ -331,7 +337,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
         var step by remember(sensor) { mutableStateOf("attach") }
         val verified = state == if (sensor == 1) Proto.ST_VERIFY1_OK else Proto.ST_VERIFY2_OK
         AlertDialog(
-            onDismissRequest = { vm.finishRetest(false) },
+            onDismissRequest = { vm.cancelCalibrationToDashboard() },
             title = { Text("Sensor $sensor — ${if (sensor == 1) "start" else "stop"}") },
             text = {
                 Column {
@@ -417,7 +423,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                 }
             },
             dismissButton = {
-                TextButton(onClick = { vm.finishRetest(false) }) { Text("Cancel") }
+                TextButton(onClick = { vm.cancelCalibrationToDashboard() }) { Text("Cancel") }
             },
         )
     }
@@ -564,6 +570,24 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                     passFail, notes, vel, velFps, epoch, photos,
                 )
                 manualEntry = false
+            },
+        )
+    }
+
+    if (showLowBattery) {
+        AlertDialog(
+            onDismissRequest = { dismissedLowBatteryMv = batteryMv },
+            title = { Text("Low logger battery") },
+            text = {
+                Text(
+                    "The connected logger battery is low. Recharge or replace it before relying on another shot.",
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { dismissedLowBatteryMv = batteryMv }) {
+                    Text("OK")
+                }
             },
         )
     }
@@ -864,6 +888,7 @@ private fun TopBar(vm: ChronoViewModel, connState: ConnState, deviceStatus: Devi
                     color = if (timeOk) Teal else TextDim,
                     modifier = Modifier.clickable { vm.syncTime() },
                 )
+                BatteryIndicator(deviceStatus)
             }
             vm.projectName?.let {
                 Text(
@@ -881,6 +906,62 @@ private fun TopBar(vm: ChronoViewModel, connState: ConnState, deviceStatus: Devi
             )
         }
     }
+}
+
+@Composable
+private fun BatteryIndicator(deviceStatus: DeviceStatus?) {
+    val percent = deviceStatus?.batteryPercent?.coerceIn(0, 100)
+    val mv = deviceStatus?.batteryMv
+    if (percent == null && mv == null) return
+
+    val tint = when {
+        deviceStatus?.lowBattery == true -> Bad
+        percent != null && percent <= 35 -> Amber
+        else -> Good
+    }
+    val label = buildString {
+        if (percent != null) append("$percent%")
+        if (mv != null) {
+            if (isNotEmpty()) append(" ")
+            append(String.format("%.2fV", mv / 1000.0))
+        }
+    }
+
+    Spacer(Modifier.size(14.dp))
+    Canvas(modifier = Modifier.size(width = 28.dp, height = 14.dp)) {
+        val stroke = 1.4.dp.toPx()
+        val bodyWidth = size.width - 4.dp.toPx()
+        drawRoundRect(
+            color = tint,
+            size = androidx.compose.ui.geometry.Size(bodyWidth, size.height),
+            cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx()),
+            style = Stroke(stroke),
+        )
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(bodyWidth + 1.dp.toPx(), size.height * 0.32f),
+            size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height * 0.36f),
+            cornerRadius = CornerRadius(1.dp.toPx(), 1.dp.toPx()),
+        )
+        val fillFraction = ((percent ?: batteryPercentFromMv(mv ?: 0)).coerceIn(0, 100)) / 100f
+        drawRoundRect(
+            color = tint.copy(alpha = 0.85f),
+            topLeft = Offset(stroke * 2f, stroke * 2f),
+            size = androidx.compose.ui.geometry.Size(
+                ((bodyWidth - stroke * 4f) * fillFraction).coerceAtLeast(1.dp.toPx()),
+                (size.height - stroke * 4f).coerceAtLeast(1.dp.toPx()),
+            ),
+            cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx()),
+        )
+    }
+    Spacer(Modifier.size(5.dp))
+    Text(label, style = MaterialTheme.typography.bodyMedium, color = tint)
+}
+
+private fun batteryPercentFromMv(mv: Int): Int {
+    if (mv >= 4200) return 100
+    if (mv <= 3300) return 0
+    return (((mv - 3300) * 100.0) / 900.0).roundToInt().coerceIn(0, 100)
 }
 
 /**

@@ -107,7 +107,7 @@ const uint8_t UUID_CAL    [16] = CHRONO_UUID(0x0006);
 const uint8_t UUID_INFO   [16] = CHRONO_UUID(0x0007);
 
 BLEService        svc     (UUID_SERVICE);
-BLECharacteristic chStatus (UUID_STATUS);   // read/notify: [state, pendingCount, timeValid]
+BLECharacteristic chStatus (UUID_STATUS);   // read/notify: StatusPacket below
 BLECharacteristic chControl(UUID_CONTROL);  // write: commands
 BLECharacteristic chResult (UUID_RESULT);   // read/notify: Result struct below
 BLECharacteristic chTime   (UUID_TIME);     // write: uint32 LE unix seconds
@@ -157,7 +157,15 @@ struct __attribute__((packed)) CalResult {
 // follows automatically — no app update needed.
 const uint8_t HW_REV   = 1;
 const uint8_t FW_MAJOR = 1;
-const uint8_t FW_MINOR = 4;
+const uint8_t FW_MINOR = 5;
+
+struct __attribute__((packed)) StatusPacket {
+  uint8_t  state;
+  uint8_t  pendingCount;
+  uint8_t  timeValid;
+  uint8_t  batteryPercent;
+  uint16_t batteryMv;
+};
 
 struct __attribute__((packed)) HwInfo {
   uint8_t  hwRev;
@@ -185,6 +193,7 @@ volatile uint8_t calRequested = 0;   // 1 or 2; handled in loop()
 // the pending[] buffer is only ever mutated from one context.
 volatile uint16_t ackQueue[MAX_PENDING];
 volatile uint8_t  ackHead = 0, ackTail = 0;
+uint32_t lastBatteryNotifyMs = 0;
 
 // Wall-clock: the phone writes unix time; we extrapolate with millis().
 bool     timeValid  = false;
@@ -396,10 +405,31 @@ uint32_t epochForBootMs(uint32_t bootMs) {
   return epochBase + deltaMs / 1000;
 }
 
+uint16_t readBatteryMv() {
+  analogReadResolution(12);
+  uint32_t raw = analogReadVDDHDIV5();
+  uint32_t mv = (raw * 3600UL * 5UL + 2047UL) / 4095UL;
+  if (mv > 65535UL) mv = 65535UL;
+  return (uint16_t)mv;
+}
+
+uint8_t batteryPercentFromMv(uint16_t mv) {
+  if (mv >= 4200) return 100;
+  if (mv <= 3300) return 0;
+  return (uint8_t)(((uint32_t)(mv - 3300) * 100UL + 450UL) / 900UL);
+}
+
 void notifyStatus() {
-  uint8_t buf[3] = { state, pendingCount, (uint8_t)(timeValid ? 1 : 0) };
-  chStatus.write(buf, sizeof(buf));
-  chStatus.notify(buf, sizeof(buf));
+  uint16_t batteryMv = readBatteryMv();
+  StatusPacket pkt = {
+    state,
+    pendingCount,
+    (uint8_t)(timeValid ? 1 : 0),
+    batteryPercentFromMv(batteryMv),
+    batteryMv
+  };
+  chStatus.write((uint8_t*)&pkt, sizeof(pkt));
+  chStatus.notify((uint8_t*)&pkt, sizeof(pkt));
 }
 
 void notifyPending(const Pending& p) {
@@ -526,7 +556,7 @@ void setup() {
 
   chStatus.setProperties(CHR_PROPS_READ | CHR_PROPS_NOTIFY);
   chStatus.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
-  chStatus.setFixedLen(3);
+  chStatus.setFixedLen(sizeof(StatusPacket));
   chStatus.setCccdWriteCallback(onStatusCccd);
   chStatus.begin();
 
@@ -639,6 +669,11 @@ void loop() {
       notifyPending(pending[i]);
       delay(15);   // give the BLE stack room between notifications
     }
+  }
+
+  if ((uint32_t)(millis() - lastBatteryNotifyMs) >= 30000UL) {
+    lastBatteryNotifyMs = millis();
+    notifyStatus();
   }
 
   // Status LED on P0.15: standby blinks 1s on / 1s off, timing solid on.

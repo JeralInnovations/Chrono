@@ -605,6 +605,17 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         enqueueCal(listOf(1 to CalPhase.LOADED, 2 to CalPhase.LOADED))
     }
 
+    fun cancelCalibrationToDashboard() {
+        calTimeoutJob?.cancel()
+        calQueue.clear()
+        pendingCal = null
+        calRunning = false
+        retestSensor = null
+        inWizard = false
+        ble.sendCommand(Proto.CMD_CANCEL)
+        screen = Screen.DASHBOARD
+    }
+
     /** Raw engineering log, one JSON line per sweep, for later analysis. */
     private fun appendCalHistory(key: String, r: CalReading) {
         runCatching {
@@ -650,6 +661,12 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         }.trimEnd('0').trimEnd('.')
         return "$text$unit"
     }
+
+    fun baselineTooHigh(entry: CalEntry?): Boolean =
+        entry?.isUsable == true && entry.medianNs >= 3_000
+
+    fun baselineCapacitanceText(entry: CalEntry?): String =
+        entry?.let { capacitanceText(it.medianNs) } ?: ""
 
     /**
      * Conservative accuracy envelope for one result, as a percent of velocity.

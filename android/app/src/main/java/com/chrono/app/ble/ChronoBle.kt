@@ -57,7 +57,17 @@ object Proto {
     const val ST_CALIBRATING = 7
 }
 
-data class DeviceStatus(val state: Int, val pendingCount: Int, val timeValid: Boolean)
+data class DeviceStatus(
+    val state: Int,
+    val pendingCount: Int,
+    val timeValid: Boolean,
+    val batteryPercent: Int? = null,
+    val batteryMv: Int? = null,
+) {
+    val lowBattery: Boolean
+        get() = (batteryPercent != null && batteryPercent <= 15) ||
+            (batteryMv != null && batteryMv in 1..3499)
+}
 
 data class RawResult(val id: Int, val splitNs: Long, val epochSec: Long)
 
@@ -262,7 +272,7 @@ class ChronoBle(private val context: Context) {
     }
 
     private fun pushSimStatus() {
-        status.value = DeviceStatus(simState, simPending, simTimeValid)
+        status.value = DeviceStatus(simState, simPending, simTimeValid, batteryPercent = 82, batteryMv = 3990)
     }
 
     private fun simCommand(cmd: Byte, arg: Int) {
@@ -536,10 +546,16 @@ class ChronoBle(private val context: Context) {
     private fun handleValue(uuid: UUID, v: ByteArray) {
         when (uuid) {
             Proto.STATUS -> if (v.size >= 3) {
+                val batteryPercent = if (v.size >= 4) v[3].toInt() and 0xFF else null
+                val batteryMv = if (v.size >= 6) {
+                    ByteBuffer.wrap(v, 4, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt() and 0xFFFF
+                } else null
                 status.value = DeviceStatus(
                     state = v[0].toInt() and 0xFF,
                     pendingCount = v[1].toInt() and 0xFF,
                     timeValid = v[2].toInt() != 0,
+                    batteryPercent = batteryPercent,
+                    batteryMv = batteryMv,
                 )
             }
             Proto.RESULT -> if (v.size >= 11) {
