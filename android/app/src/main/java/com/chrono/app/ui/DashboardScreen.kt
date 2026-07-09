@@ -77,6 +77,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
@@ -1544,11 +1545,23 @@ private fun ChoiceSelector(
             val selected = value.equals(option, ignoreCase = true)
             if (selected) {
                 Button(onClick = { onChange(option) }, modifier = Modifier.weight(1f)) {
-                    Text(option, textAlign = TextAlign.Center)
+                    Text(
+                        option,
+                        textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             } else {
                 OutlinedButton(onClick = { onChange(option) }, modifier = Modifier.weight(1f)) {
-                    Text(option, textAlign = TextAlign.Center)
+                    Text(
+                        option,
+                        textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
         }

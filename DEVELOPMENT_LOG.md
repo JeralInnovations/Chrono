@@ -8,3 +8,4 @@
 - 2026-07-08: Added visible automatic BLE reconnect retries and restored simulated-mode photo thumbnails after camera or gallery returns.
 - 2026-07-08: Added device battery voltage reporting, app battery level display, and low-battery warning behavior.
 - 2026-07-09: Added high port-baseline capacitance warnings and calibration cancel paths back to the connected dashboard.
+- 2026-07-09: Updated port baseline readings to show capacitance with centered port labels and prevented shot-type buttons from wrapping.

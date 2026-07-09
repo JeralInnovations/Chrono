@@ -196,9 +196,9 @@ fun BaselineScreen(vm: ChronoViewModel, connState: ConnState) {
         }
         Spacer(Modifier.height(20.dp))
 
-        CalRow("Port 1", vm.calData["b1"])
+        CalRow("Port 1", vm.calData["b1"], vm::capacitanceText)
         Spacer(Modifier.height(8.dp))
-        CalRow("Port 2", vm.calData["b2"])
+        CalRow("Port 2", vm.calData["b2"], vm::capacitanceText)
         if (highBaselinePorts.isNotEmpty()) {
             Spacer(Modifier.height(14.dp))
             Text(
@@ -236,24 +236,29 @@ fun BaselineScreen(vm: ChronoViewModel, connState: ConnState) {
 }
 
 @Composable
-private fun CalRow(label: String, entry: com.chrono.app.CalEntry?) {
-    Row(
+private fun CalRow(label: String, entry: com.chrono.app.CalEntry?, capacitanceText: (Long) -> String) {
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        Text(label, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(2.dp))
         val text = when {
             entry == null -> "-"
             !entry.isUsable && entry.status == 2 -> "No usable samples - n=${entry.samples}"
             !entry.isUsable -> "Incomplete - n=${entry.samples}"
-            else -> "%.2f us  -  sigma %d ns  -  n=%d".format(
-                entry.medianNs / 1000.0, entry.stddevNs, entry.samples
+            else -> "%.2f us  -  %s  -  sigma %d ns".format(
+                entry.medianNs / 1000.0,
+                capacitanceText(entry.medianNs),
+                entry.stddevNs,
             )
         }
         Text(
             text,
             style = MaterialTheme.typography.bodyMedium,
             color = if (entry == null || entry.status == 0) TextDim else Amber,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
         )
     }
 }
