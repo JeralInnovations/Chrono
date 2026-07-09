@@ -100,7 +100,10 @@ fun ConnectScreen(vm: ChronoViewModel, connState: ConnState) {
             connState == ConnState.CONNECTING || connState == ConnState.RECONNECTING -> {
                 CircularProgressIndicator(color = Amber)
                 Spacer(Modifier.height(16.dp))
-                Text("Connecting…", color = TextDim)
+                Text(
+                    if (connState == ConnState.RECONNECTING) "Reconnecting automatically..." else "Connecting...",
+                    color = TextDim,
+                )
             }
 
             else -> {

@@ -5,3 +5,4 @@
 - 2026-07-07: Added shot type classification, field help popups, and simplified/larger setup and dashboard instructions.
 - 2026-07-07: Renamed the app to Chrono Logger, enlarged text, clarified GAE/channel calibration help, corrected disruptor placeholders, and made photo selection toggleable.
 - 2026-07-08: Expanded the GAE info popup with the acronym meaning, a velocity-range example, and the factors that widen or narrow the envelope.
+- 2026-07-08: Added visible automatic BLE reconnect retries and restored simulated-mode photo thumbnails after camera or gallery returns.

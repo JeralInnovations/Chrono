@@ -157,6 +157,8 @@ class ChronoBle(private val context: Context) {
 
     fun connect(device: BluetoothDevice) {
         stopScan()
+        reconnectJob?.cancel()
+        runCatching { gatt?.close() }
         prefs.edit().putString("lastDeviceAddress", device.address).apply()
         userDisconnected = false
         connState.value = ConnState.CONNECTING
@@ -168,12 +170,12 @@ class ChronoBle(private val context: Context) {
         val device = runCatching { adapter?.getRemoteDevice(address) }.getOrNull() ?: return false
         stopScan()
         userDisconnected = false
-        connState.value = ConnState.CONNECTING
-        gatt = device.connectGatt(context, true, gattCb, BluetoothDevice.TRANSPORT_LE)
+        scheduleReconnect(device)
         return true
     }
 
     fun disconnect() {
+        reconnectJob?.cancel()
         if (isSimulation) {
             simJob?.cancel()
             isSimulation = false
@@ -206,6 +208,8 @@ class ChronoBle(private val context: Context) {
 
     private val simScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var simJob: Job? = null
+    private val bleScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var reconnectJob: Job? = null
     private var simState = Proto.ST_IDLE
     private var simPending = 0
     private var simTimeValid = false
@@ -215,6 +219,10 @@ class ChronoBle(private val context: Context) {
 
     fun connectSimulated() {
         stopScan()
+        reconnectJob?.cancel()
+        userDisconnected = true
+        runCatching { gatt?.disconnect(); gatt?.close() }
+        gatt = null
         isSimulation = true
         simState = Proto.ST_IDLE
         simPending = 0
@@ -224,6 +232,22 @@ class ChronoBle(private val context: Context) {
         hwInfo.value = HwInfo(1, 1, 4, 62_500, 30, 300, "SIM-0001")   // training identity
         pushSimStatus()
         connState.value = ConnState.CONNECTED
+    }
+
+    private fun scheduleReconnect(device: BluetoothDevice) {
+        if (userDisconnected) return
+        reconnectJob?.cancel()
+        connState.value = ConnState.RECONNECTING
+        reconnectJob = bleScope.launch {
+            while (!userDisconnected && connState.value != ConnState.CONNECTED) {
+                synchronized(opLock) { opQueue.clear(); opInFlight = false }
+                runCatching { gatt?.close() }
+                gatt = runCatching {
+                    device.connectGatt(context, false, gattCb, BluetoothDevice.TRANSPORT_LE)
+                }.getOrNull()
+                delay(4_000)
+            }
+        }
     }
 
     /** Toggle the link for testing: drop to RECONNECTING, tap again to restore. */
@@ -440,6 +464,7 @@ class ChronoBle(private val context: Context) {
         override fun onConnectionStateChange(g: BluetoothGatt, statusCode: Int, newState: Int) {
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
+                    reconnectJob?.cancel()
                     g.requestMtu(185)
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
@@ -449,13 +474,11 @@ class ChronoBle(private val context: Context) {
                         gatt = null
                         connState.value = ConnState.DISCONNECTED
                     } else {
-                        // Expected during test standby: reconnect automatically.
-                        // autoConnect=true waits patiently until the device is
-                        // back in range, then the whole init sequence reruns.
+                        // Expected during test standby: reconnect automatically
+                        // with visible state and explicit retries.
                         val device = g.device
                         g.close()
-                        connState.value = ConnState.RECONNECTING
-                        gatt = device.connectGatt(context, true, this, BluetoothDevice.TRANSPORT_LE)
+                        scheduleReconnect(device)
                     }
                 }
             }

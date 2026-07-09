@@ -283,11 +283,15 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         photoPrompt = prefs.getString("photoPrompt", null)
         if (photoPrompt != null && setupDone) {
             screen = Screen.DASHBOARD
-            ble.reconnectLast()
+            when (prefs.getString("uiMode", "")) {
+                "sim" -> ble.connectSimulated()
+                "manual" -> Unit
+                else -> ble.reconnectLast()
+            }
         }
         // Normal launches still start at mode select. Photo capture is the one
         // exception: the OS can recreate us after camera approval, so resume the
-        // dashboard prompt and try to reattach to the last selected BLE device.
+        // dashboard prompt and restore whichever mode opened the camera.
     }
 
     // -------------------------------------------------------------- results

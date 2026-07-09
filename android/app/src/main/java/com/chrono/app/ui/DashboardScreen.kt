@@ -121,7 +121,7 @@ fun ReconnectingBanner() {
         )
         Spacer(Modifier.size(10.dp))
         Text(
-            "Connection lost. Reconnecting; results stay on the device.",
+            "Bluetooth link lost. Reconnecting automatically when the logger is back in range.",
             style = MaterialTheme.typography.bodyMedium,
             color = Bad,
         )
@@ -154,7 +154,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
 
     // Manual-logging mode: no device, so hide everything device-specific.
     val offline = connState == ConnState.DISCONNECTED
-    val setupPhotos = remember(photoRevision, vm.pendingLabel) { vm.setupPhotos() }
+    val setupPhotos = remember(photoRevision, vm.pendingLabel, vm.isSimulation) { vm.setupPhotos() }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -570,7 +570,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
 
     // Photo prompts: after setup, and after each recorded shot.
     vm.photoPrompt?.let { kind ->
-        val promptPhotos = remember(photoRevision, kind, vm.pendingLabel) { vm.promptPhotos(kind) }
+        val promptPhotos = remember(photoRevision, kind, vm.pendingLabel, vm.isSimulation) { vm.promptPhotos(kind) }
         val savedCount = promptPhotos.size
         AlertDialog(
             onDismissRequest = { vm.dismissPhotoPrompt() },
