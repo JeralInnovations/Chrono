@@ -22,6 +22,8 @@ Additional guides:
   calibration signature math, expected timing variability, and GAE assumptions.
 - `docs/CHEAP_BRASS_PIEZO_GUIDE.md` explains how to sort, pair, and validate
   inexpensive brass piezo sensors for the entry and advanced builds.
+- `docs/FOUR_CHANNEL_WATERPROOF_BUILD.md` lays out the planned four-channel
+  waterproof XIAO nRF52840 entry build with battery and pogo charging.
 
 ---
 
