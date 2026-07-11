@@ -16,6 +16,13 @@ Chrono/
 └── README.md
 ```
 
+Additional guides:
+
+- `docs/PORT_FRONT_END_MATH.md` explains the current GPIO piezo front-end,
+  calibration signature math, expected timing variability, and GAE assumptions.
+- `docs/CHEAP_BRASS_PIEZO_GUIDE.md` explains how to sort, pair, and validate
+  inexpensive brass piezo sensors for the entry and advanced builds.
+
 ---
 
 ## 1. Hardware & wiring
