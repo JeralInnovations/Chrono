@@ -13,3 +13,4 @@
 - 2026-07-09: Compacted the dashboard header for narrow phones and widened shot-type button text handling.
 - 2026-07-09: Calibrated capacitance estimates from Fluke-verified 30.0 nF and 34.2 nF loads.
 - 2026-07-09: Replaced user-facing capacitance estimates with raw RC delay/signature values and channel mismatch percent.
+- 2026-07-10: Added port front-end and timing math documentation for the current GPIO piezo setup and GAE assumptions.
