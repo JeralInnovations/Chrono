@@ -35,6 +35,17 @@ data class TestResult(
     var manualVelocityMps: Double? = null,
     /** MCU identity captured from the hardware info characteristic for traceability. */
     var deviceSerial: String = "",
+    var resultFlags: Int = 0,
+    var rawStartTicks: Long = 0,
+    var rawStopTicks: Long = 0,
+    var batteryMv: Int? = null,
+    var portFlags: Int = 0,
+    var bootId: Long = 0,
+    var resetCause: Long = 0,
+    var hardwareRevision: Int = 0,
+    var firmwareVersion: String = "",
+    var formatVersion: Int = 1,
+    var crcValid: Boolean = true,
     /** folder id under ChronoData holding this shot's log and photos */
     var shotFolder: String = "",
     /** user-chosen cover image URI for this shot ("" = use the first photo) */
@@ -47,6 +58,16 @@ data class TestResult(
         get() = manualVelocityMps
             ?: if (splitNs > 0 && distanceM > 0) distanceM / splitSeconds else 0.0
     val feetPerSecond: Double get() = metersPerSecond * 3.28084
+
+    fun timingFaultText(): String? = when {
+        resultFlags and 0x80 != 0 -> "High-frequency clock failed to stabilize"
+        resultFlags and 0x04 != 0 -> "STOP triggered before START"
+        resultFlags and 0x08 != 0 -> "STOP did not trigger before timeout"
+        resultFlags and 0x10 != 0 -> "Split time below allowed range"
+        resultFlags and 0x20 != 0 -> "Split time above allowed range"
+        !crcValid -> "Result packet CRC failed"
+        else -> null
+    }
 
     fun splitTimeText(): String {
         if (splitNs <= 0) return "not recorded"
@@ -135,6 +156,17 @@ class ResultStore(context: Context, simulation: Boolean = false) {
                     outcome = legacyOutcome,
                     manualVelocityMps = o.optDouble("manualVelocityMps").takeIf { !it.isNaN() },
                     deviceSerial = o.optString("deviceSerial", ""),
+                    resultFlags = o.optInt("resultFlags", 0),
+                    rawStartTicks = o.optLong("rawStartTicks", 0),
+                    rawStopTicks = o.optLong("rawStopTicks", 0),
+                    batteryMv = o.optInt("batteryMv", -1).takeIf { it >= 0 },
+                    portFlags = o.optInt("portFlags", 0),
+                    bootId = o.optLong("bootId", 0),
+                    resetCause = o.optLong("resetCause", 0),
+                    hardwareRevision = o.optInt("hardwareRevision", 0),
+                    firmwareVersion = o.optString("firmwareVersion", ""),
+                    formatVersion = o.optInt("formatVersion", 1),
+                    crcValid = o.optBoolean("crcValid", true),
                     shotFolder = o.optString("shotFolder", ""),
                     thumbnailUri = o.optString("thumbnailUri", ""),
                 )
@@ -163,11 +195,22 @@ class ResultStore(context: Context, simulation: Boolean = false) {
                     .put("specialNotes", r.specialNotes)
                     .put("outcome", r.specialNotes.ifBlank { r.outcome })
                     .put("deviceSerial", r.deviceSerial)
+                    .put("resultFlags", r.resultFlags)
+                    .put("rawStartTicks", r.rawStartTicks)
+                    .put("rawStopTicks", r.rawStopTicks)
+                    .put("portFlags", r.portFlags)
+                    .put("bootId", r.bootId)
+                    .put("resetCause", r.resetCause)
+                    .put("hardwareRevision", r.hardwareRevision)
+                    .put("firmwareVersion", r.firmwareVersion)
+                    .put("formatVersion", r.formatVersion)
+                    .put("crcValid", r.crcValid)
                     .put("shotFolder", r.shotFolder)
                     .put("thumbnailUri", r.thumbnailUri)
                     .apply {
                         r.targetDistValue?.let { put("targetDistValue", it) }
                         r.manualVelocityMps?.let { put("manualVelocityMps", it) }
+                        r.batteryMv?.let { put("batteryMv", it) }
                     }
             )
         }

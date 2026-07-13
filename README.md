@@ -1,21 +1,34 @@
 # Chrono — BLE Chronograph
 
-A two-sensor chronograph built on the **nice!nano v2 nRF52840**, controlled by a
-native **Android app** over Bluetooth Low Energy.
+A two-sensor chronograph with dedicated builds for the **nice!nano v2** and
+the economical **Seeed Studio XIAO nRF52840 PTH board**, controlled by a native
+**Android app** over Bluetooth Low Energy.
 
 - Sensor 1 (START) pulls input **D0** high → the clock starts
 - Sensor 2 (STOP) pulls input **D1** high → the clock stops
-- The split time is measured in **microseconds** with GPIO interrupts
+- The split time is captured by hardware timer logic with 62.5 ns tick resolution
 - Results survive BLE disconnects: the device stores up to 16 un-collected results
   and the app reconnects automatically and downloads them
 
 ```
 Chrono/
-├── firmware/Chronograph/Chronograph.ino   ← flash this to the nice!nano
+├── firmware/ChronographNiceNano/           ← flash this to a nice!nano v2
+├── firmware/ChronographXiao/               ← flash this to the XIAO PTH board
+├── firmware/Chronograph/                   ← canonical/reference firmware source
 ├── android/                               ← open this folder in Android Studio
 ├── hardware/                              ← PCB design, BOM, protection front-end
 └── README.md
 ```
+
+## Choose the correct build
+
+| Hardware | Sketch | Power and battery behavior | LED |
+|---|---|---|---|
+| Original nice!nano v2 logger | `firmware/ChronographNiceNano/ChronographNiceNano.ino` | 1S LiPo on the board battery/input rail. Firmware reads VDDH with `analogReadVDDHDIV5()` and applies the 3.40 V / 3.50 V arm-lock hysteresis. | GPIO 15 |
+| Economical two-channel PTH logger | `firmware/ChronographXiao/ChronographXiao.ino` | Protected 1S LiPo on the XIAO `BAT+`/`BAT-` pads. Firmware reads the onboard divider and applies the 3.40 V / 3.50 V arm-lock hysteresis. Never feed `3V3`. | D5 through 330 ohms |
+
+Both builds use D0/D1 for timing, D2/D3 for RC diagnostics, and D4 for the
+button. The XIAO board reserves D6/D7 for UART and D8/D9 for remappable I2C.
 
 Additional guides:
 
@@ -23,33 +36,70 @@ Additional guides:
   calibration signature math, expected timing variability, and GAE assumptions.
 - `docs/CHEAP_BRASS_PIEZO_GUIDE.md` explains how to sort, pair, and validate
   inexpensive brass piezo sensors for the entry and advanced builds.
+- `docs/NRF52840_BOARD_VARIANTS.md` captures the current two-board PCB layout
+  target: a two-channel unbuffered nRF52840 board and a four-channel buffered
+  nRF52840 board.
+- `docs/PIEZO_INPUT_PROTECTION.md` records the recommended two-stage piezo
+  input protection path and validation plan.
 - `docs/FOUR_CHANNEL_WATERPROOF_BUILD.md` lays out the planned four-channel
   waterproof XIAO nRF52840 entry build with battery and pogo charging.
 - [hardware/README.md](hardware/README.md) — the economical two-channel board
   design: per-port piezo protection (TVS + Schottky clamps + bleed), BOM with
   part numbers, net-class/DRC files, and layout guidance.
+- `docs/ECONOMICAL_TWO_CHANNEL_PTH.md` is the authoritative schematic, pin,
+  diagnostics, and feature profile for the first through-hole board.
+- `docs/NICE_NANO_TWO_CHANNEL.md` records the original LiPo-powered nice!nano
+  profile and its pin-level differences.
 
 ---
 
 ## 1. Hardware & wiring
 
-Each "sensor" is anything that momentarily **connects a pin to 3.3 V** — a switch,
-a make-screen, a break-beam circuit driving a transistor, etc. The pins use the
-chip's internal pull-**down** resistors, so they sit at 0 V until a sensor fires.
+Each input normally sits at 0 V because the chip enables an internal pull-down.
+For a quick electrical test, a switch may momentarily connect the input to
+**3.3 V**. The actual piezo circuit below creates the positive pulse itself.
 
-Each channel has a piezo front-end and a calibration charge path:
+Each channel has a piezo front-end and a calibration charge path. The important
+part is the **sensor node**: it is one physical junction (for example, one PCB
+pad or soldered splice), not a component. Five connections meet there.
 
+```text
+piezo + / connector A --+-- 1k resistor --+-- MCU timing input (D0 for CH1, D1 for CH2)
+                        |                  |
+                        +-- P4KE15CA ----- GND
+                        +-- 470k --------- GND
+                                        |
+                                        +-- upper Schottky: anode here, cathode to 3V3
+                                        |
+                                        +-- lower Schottky: cathode here, anode to GND
+                                        |
+charge/test pin -- 10k 1% resistor -----+
+  (D2 for CH1, D3 for CH2)
+
+piezo - / connector B ---------------------- GND
 ```
-                        1k                          node
-  piezo (+) ───────────/\/\/\────────────┬──────────── D0 (ch 1) / D1 (ch 2)
-  piezo (–) ── GND                       │
-                                 Schottky│clamps
-                          3V3 ──|<|──────┤   (cathode to 3V3: clamps positive)
-                          GND ──|>|──────┘   (anode to GND: clamps negative)
-                                         │
-                        10k 1%           │
-  D2 (ch 1) / D3 (ch 2) ──/\/\/\─────────┘   calibration charge path
-```
+
+### Build each junction
+
+Make the following two identical junctions. Do **not** join CH1 and CH2
+together; each channel has its own sensor node.
+
+| Channel | Make this one sensor-node junction by joining... |
+|---|---|
+| CH1 / START | the far end of CH1's 1 kOhm resistor; XIAO **D0**; the **anode** of the upper 1N5711; the **cathode** of the lower 1N5711; and the far end of CH1's 10 kOhm resistor. |
+| CH2 / STOP | the far end of CH2's 1 kOhm resistor; XIAO **D1**; the **anode** of the upper 1N5711; the **cathode** of the lower 1N5711; and the far end of CH2's 10 kOhm resistor. |
+
+Then make these connections away from the junction:
+
+| Channel | Connection |
+|---|---|
+| CH1 / START | Piezo `+` (connector A) -> other end of CH1's 1 kOhm resistor. Piezo `-` (connector B) -> **GND**. Other end of CH1's 10 kOhm resistor -> **D2**. Upper-Schottky **cathode** -> **3V3**. Lower-Schottky **anode** -> **GND**. |
+| CH2 / STOP | Piezo `+` (connector A) -> other end of CH2's 1 kOhm resistor. Piezo `-` (connector B) -> **GND**. Other end of CH2's 10 kOhm resistor -> **D3**. Upper-Schottky **cathode** -> **3V3**. Lower-Schottky **anode** -> **GND**. |
+
+On a typical discrete diode, the painted stripe marks the **cathode**. Therefore:
+
+- Upper clamp: stripe to **3V3**; unstriped end to the sensor node.
+- Lower clamp: stripe to the sensor node; unstriped end to **GND**.
 
 Per channel:
 
@@ -57,8 +107,8 @@ Per channel:
 |---|---|---|
 | Piezo + | 1 kΩ series resistor | sensor node |
 | Sensor node | — | **D0** (ch 1) / **D1** (ch 2) |
-| Sensor node | Schottky, anode at node | **3V3** (positive clamp) |
-| Sensor node | Schottky, cathode at node | **GND** (negative clamp) |
+| Sensor node | Schottky, anode at node | **3V3** (positive clamp; cathode at 3V3) |
+| Sensor node | Schottky, cathode at node | **GND** (negative clamp; anode at GND) |
 | **D2** (ch 1) / **D3** (ch 2) | 10 kΩ **1% metal film** | sensor node |
 | Piezo – | wire | **GND** |
 
@@ -70,29 +120,56 @@ same piezo type, same clamp diodes, and **the same cable length** (~5 ns/m).
 
 ---
 
-## 2. Firmware - flashing the nice!nano v2 nRF52840
+### Support connections
+
+| Function | Connection |
+|---|---|
+| Wake/user button | XIAO D4 to momentary switch to GND |
+| Status LED | XIAO D5 through 330 ohms to LED anode; LED cathode to GND |
+| UART reserved | D6 TX and D7 RX |
+| Remappable I2C | D8/D9 |
+
+## 2. Firmware - flashing either logger
+
+### XIAO nRF52840 PTH board
 
 1. **Install the Arduino IDE** (2.x) from https://www.arduino.cc/en/software
-2. **Add the nice!nano board package:**
+2. **Add the Seeed nRF52 board package:**
    - *File → Preferences → Additional boards manager URLs*, paste:
      ```
-     https://raw.githubusercontent.com/JeralInnovations/nicenano-v2-arduino/master/package_nicenano_index.json
+     https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json
      ```
-   - *Tools -> Board -> Boards Manager*, search **"nice!nano"** and install
-     **nice!nano v2 Boards**.
+   - *Tools -> Board -> Boards Manager*, search **"seeed nrf52"** and install
+     the non-mbed **Seeed nRF52 Boards** package. The firmware uses Bluefruit
+     and direct nRF52840 peripherals, so do not select the mbed-enabled core.
 
-3. **Open the sketch:** `firmware/Chronograph/Chronograph.ino`
-4. **Select the board:** *Tools -> Board -> nice!nano v2 Boards -> nice!nano v2*.
+3. **Open the sketch:** `firmware/ChronographXiao/ChronographXiao.ino`
+4. **Select the board:** *Tools -> Board -> Seeed nRF52 Boards -> Seeed XIAO nRF52840*.
 
-5. **Plug in the nice!nano** over USB-C and select its port under *Tools → Port*.
+5. **Plug in the XIAO** over USB-C and select its port under *Tools -> Port*.
 6. Click **Upload** (→ arrow button).
 
 **If the upload fails or no port appears:** double-tap the tiny RESET button next
 to the USB connector quickly (like a mouse double-click). The onboard LED breathes
 and a new port appears — that's the bootloader. Select that port and upload again.
 
-When running, the device advertises as **"Chrono"**. The onboard LED turns on
-solid while armed/timing.
+When running, the device advertises as **`Chrono-XXXX`**, where the suffix is
+derived from its permanent MCU identity. The external D5 LED indicates state
+and flashes rapidly for the app's Identify command.
+
+### nice!nano v2 logger
+
+1. Add this board-manager URL in Arduino IDE preferences:
+   ```
+   https://raw.githubusercontent.com/JeralInnovations/nicenano-v2-arduino/master/package_nicenano_index.json
+   ```
+2. Install **nice!nano nRF52** from Boards Manager.
+3. Open `firmware/ChronographNiceNano/ChronographNiceNano.ino`.
+4. Select *nice!nano nRF52 -> nice!nano v2* and upload normally.
+
+This build expects a protected 1S LiPo on the nice!nano battery/input rail. Its
+board-specific firmware reads that rail and blocks a new arm at or below 3.40 V;
+the lock releases only after a filtered reading of at least 3.50 V.
 
 ---
 
@@ -228,8 +305,9 @@ electrical load before the next shot can be armed.
    pencil on the result card after you've seen the target. Everything exports
    to CSV.
 
-Each result shows **ft/s**, **m/s**, and the raw **split in milliseconds**
-(microsecond resolution). Results are stored on the phone and survive app restarts.
+Each result shows **ft/s**, **m/s**, and the raw split. The device reports
+nanoseconds from 62.5 ns hardware timer ticks. Results are stored on the phone
+and survive app restarts.
 
 ---
 
@@ -240,10 +318,10 @@ screen appears, tap **"Continue in simulation mode"**; otherwise use the
 **"Simulation mode — no hardware needed"** button at the bottom of the connect
 screen. Either way you can walk the entire UI with no chronograph present — handy for demos or trying the
 app before the hardware is built. A fake device drives the same screens the real
-one does: the sensor-verify steps auto-acknowledge after a moment, **ARM** produces
-a realistic randomized shot for the configured gap, time-sync works, and a **"Drop
-signal"** button on the dashboard briefly forces the reconnect state so you can see
-that banner. A small **SIM** badge marks the session. Tap *Disconnect* to leave.
+one does. The dashboard can select stuck-high, leakage/short, unstable, coupled,
+missing-sensor, STOP-before-START, STOP-timeout, and impossible-split scenarios.
+Time sync and simulated signal loss are also supported. A small **SIM** badge
+marks the session. Tap *Disconnect* to leave.
 
 ## 5. Design notes & limits
 
@@ -261,11 +339,19 @@ that banner. A small **SIM** badge marks the session. Tap *Disconnect* to leave.
 - **Keep the app open during standby.** Android pauses Bluetooth for backgrounded
   apps after a while; the reconnect logic is most reliable with the app in the
   foreground (screen can be off briefly).
-- **Device clock** — the XIAO has no battery-backed clock. Time is re-synced on
+- **Device clock** — neither board has a battery-backed clock. Time is re-synced on
   every connection and is lost on power-off, which is exactly why untimed results
   get the grayed-out manual date field.
 - **False triggers** — the START input is latched once while armed; noise on the
   wires can still trigger it, so keep sensor leads short or twisted.
+- **Power-loss boundary** — results are retained through BLE loss and are deleted
+  only after the app stores and acknowledges them. The current queue is still in
+  RAM, so complete logger power loss before collection can lose pending results.
+- **Battery lockout** — both builds use a protected 1S LiPo and refuse a new
+  arm at or below 3.40 V, releasing it after a filtered reading reaches 3.50 V.
+  The nice!nano reads VDDH with `analogReadVDDHDIV5()`; the XIAO reads its
+  onboard BAT divider with `PIN_VBAT` and `PIN_VBAT_ENABLE`. An in-progress
+  shot is never interrupted.
 
 ## 6. BLE protocol (for reference / hacking)
 
@@ -273,13 +359,16 @@ Service `a5c40001-9d95-4e4c-8c5a-c1d6f2a80de1`
 
 | Characteristic | UUID (…-9d95-4e4c-8c5a-c1d6f2a80de1) | Access | Payload |
 |---|---|---|---|
-| Status  | `a5c40002` | read/notify | `[state, pendingCount, timeValid]` |
+| Status  | `a5c40002` | read/notify | `state, pendingCount, timeValid, batteryPercent, batteryMv, batteryArmLocked` |
 | Control | `a5c40003` | write | `[cmd, argLo, argHi]` |
-| Result  | `a5c40004` | read/notify | `id:u16, splitNs:u32, epoch:u32, flags:u8` (LE) |
+| Result  | `a5c40004` | read/notify | v1 prefix plus raw ticks, battery, port flags, boot/reset IDs, revisions, format, CRC |
 | Time    | `a5c40005` | write | unix seconds `u32` (LE) |
 | Cal     | `a5c40006` | read/notify | `ch:u8, status:u8, n:u16, median:u32, mean:u32, stddev:u32, min:u32` ns (LE) |
+| Info    | `a5c40007` | read | revisions, timing model, MCU serial, channels, input stage, capabilities |
+| Health  | `a5c40008` | read/notify | version, channels, per-port flags/signatures, boot-relative check time |
 
 States: 0 idle · 1/3 verifying sensor 1/2 · 2/4 sensor 1/2 OK · 5 armed ·
-6 running · 7 calibrating.
+6 running · 7 calibrating · 8 checking ports · 9 fault/refused.
 Commands: 1/2 verify sensor 1/2 · 3 arm · 4 disarm · 5 ack result (arg=id) ·
-6 cancel · 7 re-send stored results · 8 calibrate (arg=channel).
+6 cancel · 7 re-send stored results · 8 calibrate (arg=channel) · 9 port health ·
+10 identify · 11 logged arm override.

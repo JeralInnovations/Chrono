@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BluetoothSearching
 import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayCircleOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -26,9 +27,13 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -51,6 +56,8 @@ fun ConnectScreen(vm: ChronoViewModel, connState: ConnState) {
     var btEnabled by remember {
         mutableStateOf(runCatching { vm.ble.adapter?.isEnabled == true }.getOrDefault(false))
     }
+    var editingAddress by remember { mutableStateOf<String?>(null) }
+    var nicknameText by remember { mutableStateOf("") }
     val enableBt = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { btEnabled = runCatching { vm.ble.adapter?.isEnabled == true }.getOrDefault(false) }
@@ -144,12 +151,26 @@ fun ConnectScreen(vm: ChronoViewModel, connState: ConnState) {
                                     Icon(Icons.Filled.Bluetooth, null, tint = Amber)
                                     Spacer(Modifier.size(14.dp))
                                     Column(Modifier.weight(1f)) {
-                                        Text(d.name, style = MaterialTheme.typography.titleMedium)
+                                        val nickname = vm.ble.nicknameFor(d.device.address)
                                         Text(
-                                            d.device.address,
+                                            nickname.ifBlank { d.name },
+                                            style = MaterialTheme.typography.titleMedium,
+                                        )
+                                        if (nickname.isNotBlank()) {
+                                            Text(d.name, style = MaterialTheme.typography.bodyMedium, color = TextDim)
+                                        }
+                                        Text(
+                                            d.device.address + if (vm.ble.wasLastConnected(d.device.address))
+                                                "  Last connected" else "",
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = TextDim,
                                         )
+                                    }
+                                    IconButton(onClick = {
+                                        editingAddress = d.device.address
+                                        nicknameText = vm.ble.nicknameFor(d.device.address)
+                                    }) {
+                                        Icon(Icons.Filled.Edit, "Rename logger", tint = TextDim)
                                     }
                                     Text("${d.rssi} dBm", color = TextDim,
                                         style = MaterialTheme.typography.bodyMedium)
@@ -190,5 +211,29 @@ fun ConnectScreen(vm: ChronoViewModel, connState: ConnState) {
             Spacer(Modifier.size(8.dp))
             Text("Manual logging (no chrono)", color = TextDim, maxLines = 1)
         }
+    }
+
+    editingAddress?.let { address ->
+        AlertDialog(
+            onDismissRequest = { editingAddress = null },
+            title = { Text("Logger nickname") },
+            text = {
+                OutlinedTextField(
+                    value = nicknameText,
+                    onValueChange = { nicknameText = it.take(32) },
+                    singleLine = true,
+                    label = { Text("Nickname") },
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.ble.setNickname(address, nicknameText)
+                    editingAddress = null
+                }) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingAddress = null }) { Text("Cancel") }
+            },
+        )
     }
 }

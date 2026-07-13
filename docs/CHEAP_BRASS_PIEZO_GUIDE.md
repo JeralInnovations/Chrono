@@ -11,7 +11,7 @@ Chrono Logger has two expected hardware classes.
 | Build | MCU/front-end | Intended use |
 |---|---|---|
 | Entry | nRF52840, direct GPIO piezo inputs, no buffers | Lowest-cost system; accuracy depends more on sensor matching, clean wiring, and conservative GAE |
-| Advanced | nRF54L15 with high-speed input buffers/comparators | Better-defined threshold timing; lower analog uncertainty after buffer delay is calibrated |
+| Advanced | nRF52840 with high-speed input buffers/comparators | Better-defined threshold timing; lower analog uncertainty after buffer delay is calibrated |
 
 Both builds benefit from matched sensors. The advanced build reduces the MCU
 GPIO threshold and rail-injection uncertainty, but it does not remove sensor
@@ -141,7 +141,7 @@ already about +/-1.04%.
 For the entry build, matched sensors and careful spacing are the two biggest
 practical improvements.
 
-## Advanced Build: nRF54L15 With Buffers
+## Advanced Build: nRF52840 With Buffers
 
 The advanced build should use high-speed input buffers or comparators between
 the piezo front-end and the MCU timer capture input.

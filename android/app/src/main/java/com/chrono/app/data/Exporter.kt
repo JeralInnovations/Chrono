@@ -26,7 +26,9 @@ object Exporter {
             appendLine(
                 "simulated,label,shot_type,disruptor_type_model,target,standoff_value,standoff_unit," +
                     "disruptor_loading,projectile_type,pass_fail,special_notes,source,date_iso," +
-                    "mcu_serial,split_time,split_ns,split_ms,distance_m,velocity_mps,velocity_fps"
+                    "mcu_serial,hardware_revision,firmware_version,battery_mv,boot_id,reset_cause," +
+                    "result_flags,port_flags,raw_start_ticks,raw_stop_ticks,format_version,crc_valid," +
+                    "timing_fault,split_time,split_ns,split_ms,distance_m,velocity_mps,velocity_fps"
             )
             for (r in results) {
                 val date = r.epochMillis?.let { Instant.ofEpochMilli(it).toString() } ?: ""
@@ -38,7 +40,12 @@ object Exporter {
                         esc(r.disruptorLoading) + "," + esc(r.projectileType.ifBlank { "Water" }) + "," +
                         esc(r.passFail) + "," + esc(r.specialNotes.ifBlank { r.outcome }) + "," +
                         (if (r.isManual) "manual" else "device") + "," +
-                        date + "," + esc(r.deviceSerial) + "," + esc(r.splitTimeText()) + "," + r.splitNs + "," +
+                        date + "," + esc(r.deviceSerial) + "," + r.hardwareRevision + "," +
+                        esc(r.firmwareVersion) + "," + (r.batteryMv ?: "") + "," + r.bootId + "," +
+                        r.resetCause + "," + r.resultFlags + "," + r.portFlags + "," +
+                        r.rawStartTicks + "," + r.rawStopTicks + "," + r.formatVersion + "," +
+                        r.crcValid + "," + esc(r.timingFaultText().orEmpty()) + "," +
+                        esc(r.splitTimeText()) + "," + r.splitNs + "," +
                         String.format(Locale.US, "%.6f", r.splitMillis) + "," +
                         String.format(Locale.US, "%.5f", r.distanceM) + "," +
                         String.format(Locale.US, "%.3f", r.metersPerSecond) + "," +
@@ -53,6 +60,15 @@ object Exporter {
             val calCopy = File(dir, "chrono_cal_$tag$stamp.jsonl")
             cal.copyTo(calCopy, overwrite = true)
             uris.add(uriFor(context, calCopy))
+        }
+        val health = File(
+            context.filesDir,
+            if (simulated) "health_history_sim.jsonl" else "health_history.jsonl"
+        )
+        if (health.exists()) {
+            val healthCopy = File(dir, "chrono_health_$tag$stamp.jsonl")
+            health.copyTo(healthCopy, overwrite = true)
+            uris.add(uriFor(context, healthCopy))
         }
 
         val send = Intent(Intent.ACTION_SEND_MULTIPLE).apply {

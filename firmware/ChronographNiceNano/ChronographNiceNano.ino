@@ -29,11 +29,7 @@
  *   Pins use the internal pull-DOWN; a trigger is any rising edge past the
  *   input threshold. Match the two channels (piezo, clamp, CABLE LENGTH).
  *
- * Supported builds:
- *   ChronographNiceNano/ChronographNiceNano.ino - nice!nano v2, 1S LiPo
- *   ChronographXiao/ChronographXiao.ino         - XIAO nRF52840, 1S LiPo
- *
- * Both use a Bluefruit-compatible nRF52840 Arduino core.
+ * nice!nano v2 build. This sketch intentionally uses the default board profile.
  */
 
 // Arduino generates function prototypes before the later packet definitions.

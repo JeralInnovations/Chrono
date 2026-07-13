@@ -90,7 +90,9 @@ import androidx.compose.ui.unit.sp
 import com.chrono.app.ChronoViewModel
 import com.chrono.app.ble.ConnState
 import com.chrono.app.ble.DeviceStatus
+import com.chrono.app.ble.HealthStatus
 import com.chrono.app.ble.Proto
+import com.chrono.app.ble.SimFault
 import com.chrono.app.data.Exporter
 import com.chrono.app.data.TARGET_DIST_UNITS
 import com.chrono.app.data.TestResult
@@ -138,6 +140,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
     val state = deviceStatus?.state ?: -1
     val armed = state == Proto.ST_ARMED
     val running = state == Proto.ST_RUNNING
+    val health by vm.ble.health.collectAsState()
     var editing by remember { mutableStateOf<TestResult?>(null) }
     var manualEntry by remember { mutableStateOf(false) }
     // (photo uri, owning result uid) so the viewer can offer "set as cover"
@@ -230,6 +233,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                     }
                 }
             }
+            item { SimulationFaultControl(vm) }
         }
 
         if (offline) {
@@ -251,14 +255,28 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                 )
             }
 
+            item {
+                PortHealthCard(
+                    health = health,
+                    checking = state == Proto.ST_CHECKING,
+                    enabled = connState == ConnState.CONNECTED && !armed && !running,
+                    onCheck = { vm.checkPorts() },
+                    onIdentify = { vm.identifyLogger() },
+                    onOverride = { vm.armWithOverride() },
+                )
+            }
+
             item { NextTestCard(vm, armed = armed || running) }
 
             item {
                 ArmButton(
                     armed = armed,
                     running = running,
-                    connected = connState == ConnState.CONNECTED || connState == ConnState.RECONNECTING,
-                    sensorsReady = vm.sensor1Ready && vm.sensor2Ready,
+                    connected = (connState == ConnState.CONNECTED || connState == ConnState.RECONNECTING) &&
+                        state != Proto.ST_CHECKING,
+                    sensorsReady = vm.sensor1Ready && vm.sensor2Ready &&
+                        deviceStatus?.batteryLocked != true,
+                    batteryLocked = deviceStatus?.batteryLocked == true,
                     onArm = { vm.arm() },
                     onDisarm = { vm.disarm() },
                 )
@@ -958,6 +976,10 @@ private fun BatteryIndicator(deviceStatus: DeviceStatus?, compact: Boolean = fal
             if (isNotEmpty()) append(" ")
             append(String.format("%.2fV", mv / 1000.0))
         }
+        if (deviceStatus?.batteryLocked == true) {
+            if (isNotEmpty()) append(" ")
+            append("ARM LOCK")
+        }
     }
 
     Spacer(Modifier.size(if (compact) 8.dp else 14.dp))
@@ -1000,6 +1022,78 @@ private fun batteryPercentFromMv(mv: Int): Int {
     if (mv >= 4200) return 100
     if (mv <= 3300) return 0
     return (((mv - 3300) * 100.0) / 900.0).roundToInt().coerceIn(0, 100)
+}
+
+@Composable
+private fun SimulationFaultControl(vm: ChronoViewModel) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        OutlinedButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth()) {
+            Text("Simulated fault: ${vm.ble.simFault.label}")
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            SimFault.entries.forEach { fault ->
+                DropdownMenuItem(
+                    text = { Text(fault.label) },
+                    onClick = { vm.setSimFault(fault); open = false },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PortHealthCard(
+    health: HealthStatus?,
+    checking: Boolean,
+    enabled: Boolean,
+    onCheck: () -> Unit,
+    onIdentify: () -> Unit,
+    onOverride: () -> Unit,
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(Modifier.fillMaxWidth().padding(18.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("PORT HEALTH", style = MaterialTheme.typography.labelSmall,
+                    color = TextDim, modifier = Modifier.weight(1f))
+                TextButton(onClick = onIdentify, enabled = enabled) { Text("Identify") }
+                TextButton(onClick = onCheck, enabled = enabled && !checking) {
+                    Text(if (checking) "Checking..." else "Check")
+                }
+            }
+            if (health == null || health.checkedAtBootMs == 0L) {
+                Text("Run a check before arming.", color = TextDim)
+            } else {
+                val rows = listOf(1 to health.channel1, 2 to health.channel2)
+                rows.forEach { (channel, port) ->
+                    Row(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                        Text("CH$channel", modifier = Modifier.weight(0.25f), color = TextDim)
+                        Text(
+                            port.summary(),
+                            modifier = Modifier.weight(0.75f),
+                            color = when {
+                                port.serious -> Bad
+                                port.flags != 0 -> Amber
+                                else -> Good
+                            },
+                        )
+                    }
+                }
+                if (!health.ready) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Arming is blocked. Leakage faults are reported conservatively; " +
+                            "software cannot prove that moisture is the cause.",
+                        color = Amber,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    TextButton(onClick = onOverride, enabled = enabled) {
+                        Text("Arm with logged override", color = Amber)
+                    }
+                }
+            }
+        }
+    }
 }
 
 /**
@@ -1313,6 +1407,7 @@ private fun ArmButton(
     running: Boolean,
     connected: Boolean,
     sensorsReady: Boolean,
+    batteryLocked: Boolean,
     onArm: () -> Unit,
     onDisarm: () -> Unit,
 ) {
@@ -1399,7 +1494,15 @@ private fun ArmButton(
                     Spacer(Modifier.size(10.dp))
                     Text("RECORD", style = MaterialTheme.typography.labelLarge)
                 }
-                if (connected && !sensorsReady) {
+                if (connected && batteryLocked) {
+                    Text(
+                        "Battery is too low to arm. Charge it above the recovery threshold.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Bad,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    )
+                } else if (connected && !sensorsReady) {
                     Text(
                         "Replace and retest both sensors before recording.",
                         style = MaterialTheme.typography.bodyMedium,
@@ -1478,6 +1581,10 @@ private fun ResultCard(
                     style = MaterialTheme.typography.bodyMedium,
                     color = if (r.isManual) Teal else TextDim,
                 )
+                r.timingFaultText()?.let { fault ->
+                    Spacer(Modifier.height(6.dp))
+                    Text(fault, style = MaterialTheme.typography.bodyMedium, color = Bad)
+                }
                 val meta = listOfNotNull(
                     r.shotType.ifBlank { "Standard" },
                     r.tool.takeIf { it.isNotBlank() }?.let { "Disruptor: $it" },

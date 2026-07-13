@@ -22,6 +22,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.chrono.app.ble.HwInfo
+import com.chrono.app.ble.SimFault
+import com.chrono.app.ble.HealthStatus
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
@@ -41,7 +43,8 @@ data class CalEntry(
     val status: Int,
     val at: Long,
 ) {
-    val isUsable: Boolean get() = status != 2 && samples > 0
+    val isUsable: Boolean get() = status != 2 && samples > 0 &&
+        System.currentTimeMillis() - at <= 30L * 24L * 60L * 60L * 1000L
 }
 
 class ChronoViewModel(app: Application) : AndroidViewModel(app) {
@@ -212,17 +215,25 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
 
     // Break-screens are consumed by every shot: these flip false on each new
     // result, and both must be re-verified before the next arm.
-    var sensor1Ready by mutableStateOf(prefs.getBoolean("s1Ready", false))
+    var sensor1Ready by mutableStateOf(false)
         private set
-    var sensor2Ready by mutableStateOf(prefs.getBoolean("s2Ready", false))
+    var sensor2Ready by mutableStateOf(false)
         private set
 
     private fun setSensorReady(sensor: Int, ready: Boolean) {
         if (sensor == 1) sensor1Ready = ready else sensor2Ready = ready
-        prefs.edit().putBoolean(if (sensor == 1) "s1Ready" else "s2Ready", ready).apply()
+        prefs.edit().putBoolean(readyKey(sensor), ready).apply()
     }
 
-    private val setupDone: Boolean get() = prefs.getBoolean("setupDone", false)
+    private fun readyKey(sensor: Int) = "ready_${ble.deviceStorageKey}_$sensor"
+
+    private fun loadDeviceReadiness() {
+        sensor1Ready = prefs.getBoolean(readyKey(1), false)
+        sensor2Ready = prefs.getBoolean(readyKey(2), false)
+    }
+
+    private val setupDone: Boolean
+        get() = prefs.getBoolean("setupDone_${ble.deviceStorageKey}", false)
 
     val isSimulation: Boolean get() = ble.isSimulation
 
@@ -231,6 +242,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     val calData = mutableStateMapOf<String, CalEntry>()
     // Tracks which mode's records are currently loaded (null until first load).
     private var loadedMode: Boolean? = null
+    private var loadedNamespace: String? = null
     var calRunning by mutableStateOf(false)
         private set
     private val calQueue = ArrayDeque<Pair<Int, CalPhase>>()
@@ -242,6 +254,17 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         reloadForMode()
         viewModelScope.launch { ble.cal.collect { onCalReading(it) } }
         viewModelScope.launch { ble.results.collect { onRawResult(it) } }
+        viewModelScope.launch {
+            ble.health.collect { health -> health?.let { appendHealthHistory(it) } }
+        }
+        viewModelScope.launch {
+            ble.hwInfo.collect { info ->
+                if (info?.mcuSerial?.isNotBlank() == true) {
+                    loadDeviceReadiness()
+                    reloadForMode()
+                }
+            }
+        }
         // Latch sensor readiness whenever a verify test passes (wizard or retest).
         viewModelScope.launch {
             ble.status.collect { st ->
@@ -257,6 +280,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
                 when (cs) {
                     ConnState.CONNECTED -> {
                         setUiMode(if (ble.isSimulation) "sim" else "real")
+                        loadDeviceReadiness()
                         reloadForMode()   // swap to this mode's isolated records
                         if (screen == Screen.CONNECT) {
                             screen = if (setupDone) Screen.DASHBOARD else Screen.BASELINE
@@ -307,7 +331,10 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun onRawResult(r: RawResult) {
         // FETCH after a reconnect can re-deliver a result we already stored.
-        val duplicate = results.any { it.deviceResultId == r.id && it.splitNs == r.splitNs }
+        val duplicate = results.any {
+            it.deviceResultId == r.id && it.splitNs == r.splitNs &&
+                (r.bootId == 0L || it.bootId == 0L || it.bootId == r.bootId)
+        }
         if (!duplicate) {
             val rec = TestResult(
                 uid = UUID.randomUUID().toString(),
@@ -324,6 +351,17 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
                 targetDistValue = pendingTargetDistVal.replace(',', '.').toDoubleOrNull(),
                 targetDistUnit = pendingTargetDistUnit,
                 deviceSerial = ble.hwInfo.value?.mcuSerial.orEmpty(),
+                resultFlags = r.flags,
+                rawStartTicks = r.startTicks,
+                rawStopTicks = r.stopTicks,
+                batteryMv = r.batteryMv,
+                portFlags = r.portFlags,
+                bootId = r.bootId,
+                resetCause = r.resetCause,
+                hardwareRevision = r.hwRev,
+                firmwareVersion = if (r.fwMajor > 0) "${r.fwMajor}.${r.fwMinor}" else "",
+                formatVersion = r.formatVersion,
+                crcValid = r.crcValid,
             )
             rec.shotFolder = session.logShot(rec.label, shotJson(rec))
             rec.thumbnailUri = session.listPhotos(rec.shotFolder).firstOrNull()?.toString() ?: ""
@@ -494,6 +532,17 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         .put("accuracyEnvelopePercent", accuracyEnvelopePercentFor(r))
         .put("ciPercent", accuracyEnvelopePercentFor(r))
         .put("deviceSerial", r.deviceSerial)
+        .put("resultFlags", r.resultFlags)
+        .put("rawStartTicks", r.rawStartTicks)
+        .put("rawStopTicks", r.rawStopTicks)
+        .put("batteryMv", r.batteryMv ?: JSONObject.NULL)
+        .put("portFlags", r.portFlags)
+        .put("bootId", r.bootId)
+        .put("resetCause", r.resetCause)
+        .put("hardwareRevision", r.hardwareRevision)
+        .put("firmwareVersion", r.firmwareVersion)
+        .put("formatVersion", r.formatVersion)
+        .put("crcValid", r.crcValid)
         .put("epochMillis", r.epochMillis ?: -1L)
         .apply { r.targetDistValue?.let { put("targetDistValue", it) } }
 
@@ -505,19 +554,50 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     private fun persist() = store.save(results.toList())
 
     /** Per-mode namespacing so simulated calibration never touches real cal data. */
-    private fun calKey(key: String) = if (ble.isSimulation) "cal_sim_$key" else "cal_$key"
+    private fun calKey(key: String) = "cal_${ble.deviceStorageKey}_$key"
     private fun calHistoryFile() = File(
         getApplication<Application>().filesDir,
         if (ble.isSimulation) "cal_history_sim.jsonl" else "cal_history.jsonl"
     )
+
+    private fun healthHistoryFile() = File(
+        getApplication<Application>().filesDir,
+        if (ble.isSimulation) "health_history_sim.jsonl" else "health_history.jsonl"
+    )
+
+    private var lastHealthFingerprint = ""
+
+    private fun appendHealthHistory(health: HealthStatus) {
+        if (health.checkedAtBootMs == 0L) return
+        val fingerprint = "${ble.deviceStorageKey}:${health.checkedAtBootMs}:" +
+            "${health.channel1.flags}:${health.channel2.flags}:" +
+            "${health.channel1.signatureNs}:${health.channel2.signatureNs}"
+        if (fingerprint == lastHealthFingerprint) return
+        lastHealthFingerprint = fingerprint
+        runCatching {
+            val line = JSONObject()
+                .put("at", System.currentTimeMillis())
+                .put("deviceSerial", ble.hwInfo.value?.mcuSerial.orEmpty())
+                .put("deviceKey", ble.deviceStorageKey)
+                .put("checkedAtBootMs", health.checkedAtBootMs)
+                .put("ready", health.ready)
+                .put("channel1Flags", health.channel1.flags)
+                .put("channel2Flags", health.channel2.flags)
+                .put("channel1SignatureNs", health.channel1.signatureNs)
+                .put("channel2SignatureNs", health.channel2.signatureNs)
+            healthHistoryFile().appendText(line.toString() + "\n")
+        }
+    }
 
     // Swap all in-memory records to the active mode's isolated store. Called at
     // startup and whenever a connection establishes the real/sim mode, so real
     // and simulated results, calibration, and folders never intermix.
     private fun reloadForMode() {
         val sim = ble.isSimulation
-        if (loadedMode == sim) return
+        val namespace = ble.deviceStorageKey
+        if (loadedMode == sim && loadedNamespace == namespace) return
         loadedMode = sim
+        loadedNamespace = namespace
         results.clear()
         results.addAll(store.load())
         calData.clear()
@@ -766,7 +846,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit()
             .putFloat("distanceValue", value.toFloat())
             .putString("unit", unit.name)
-            .putBoolean("setupDone", true)
+            .putBoolean("setupDone_${ble.deviceStorageKey}", true)
             .apply()
         screen = Screen.DASHBOARD
         if (inWizard) {
@@ -801,8 +881,12 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun arm() = ble.sendCommand(Proto.CMD_ARM)
+    fun armWithOverride() = ble.sendCommand(Proto.CMD_ARM_OVERRIDE)
     fun disarm() = ble.sendCommand(Proto.CMD_DISARM)
     fun syncTime() = ble.syncTime()
+    fun checkPorts() = ble.sendCommand(Proto.CMD_HEALTH)
+    fun identifyLogger() = ble.sendCommand(Proto.CMD_IDENTIFY)
+    fun setSimFault(fault: SimFault) = ble.setSimFault(fault)
 
     fun changeDistance() {
         inWizard = false

@@ -36,6 +36,7 @@ object Proto {
     val TIME: UUID = UUID.fromString("a5c40005-9d95-4e4c-8c5a-c1d6f2a80de1")
     val CAL: UUID = UUID.fromString("a5c40006-9d95-4e4c-8c5a-c1d6f2a80de1")
     val INFO: UUID = UUID.fromString("a5c40007-9d95-4e4c-8c5a-c1d6f2a80de1")
+    val HEALTH: UUID = UUID.fromString("a5c40008-9d95-4e4c-8c5a-c1d6f2a80de1")
     val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
     const val CMD_VERIFY1: Byte = 1
@@ -46,6 +47,9 @@ object Proto {
     const val CMD_CANCEL: Byte = 6
     const val CMD_FETCH: Byte = 7
     const val CMD_CALIBRATE: Byte = 8
+    const val CMD_HEALTH: Byte = 9
+    const val CMD_IDENTIFY: Byte = 10
+    const val CMD_ARM_OVERRIDE: Byte = 11
 
     const val ST_IDLE = 0
     const val ST_VERIFY1 = 1
@@ -55,6 +59,23 @@ object Proto {
     const val ST_ARMED = 5
     const val ST_RUNNING = 6
     const val ST_CALIBRATING = 7
+    const val ST_CHECKING = 8
+    const val ST_FAULT = 9
+
+    const val PORT_STUCK_HIGH = 1
+    const val PORT_LEAK_OR_SHORT = 2
+    const val PORT_UNSTABLE = 4
+    const val PORT_CROSS_COUPLED = 8
+    const val PORT_MISSING_SENSOR = 16
+
+    const val RESULT_TIME_VALID = 1
+    const val RESULT_ARM_OVERRIDE = 2
+    const val RESULT_STOP_BEFORE_START = 4
+    const val RESULT_STOP_TIMEOUT = 8
+    const val RESULT_SPLIT_TOO_SHORT = 16
+    const val RESULT_SPLIT_TOO_LONG = 32
+    const val RESULT_PORT_WARNING = 64
+    const val RESULT_CLOCK_FAULT = 128
 }
 
 data class DeviceStatus(
@@ -63,13 +84,67 @@ data class DeviceStatus(
     val timeValid: Boolean,
     val batteryPercent: Int? = null,
     val batteryMv: Int? = null,
+    val batteryLocked: Boolean = false,
 ) {
     val lowBattery: Boolean
-        get() = (batteryPercent != null && batteryPercent <= 15) ||
+        get() = batteryLocked || (batteryPercent != null && batteryPercent <= 15) ||
             (batteryMv != null && batteryMv in 1..3499)
 }
 
-data class RawResult(val id: Int, val splitNs: Long, val epochSec: Long)
+data class RawResult(
+    val id: Int,
+    val splitNs: Long,
+    val epochSec: Long,
+    val flags: Int = 0,
+    val startTicks: Long = 0,
+    val stopTicks: Long = 0,
+    val batteryMv: Int? = null,
+    val portFlags: Int = 0,
+    val bootId: Long = 0,
+    val resetCause: Long = 0,
+    val hwRev: Int = 0,
+    val fwMajor: Int = 0,
+    val fwMinor: Int = 0,
+    val formatVersion: Int = 1,
+    val crcValid: Boolean = true,
+)
+
+data class PortHealth(val flags: Int, val signatureNs: Long) {
+    val serious: Boolean get() = flags and (
+        Proto.PORT_STUCK_HIGH or Proto.PORT_LEAK_OR_SHORT or
+            Proto.PORT_CROSS_COUPLED or Proto.PORT_MISSING_SENSOR
+        ) != 0
+
+    fun summary(): String = when {
+        flags and Proto.PORT_STUCK_HIGH != 0 -> "Input stuck high"
+        flags and Proto.PORT_CROSS_COUPLED != 0 -> "Cross-channel connection suspected"
+        flags and Proto.PORT_LEAK_OR_SHORT != 0 -> "Conductive leakage or short suspected"
+        flags and Proto.PORT_MISSING_SENSOR != 0 -> "Sensor not detected"
+        flags and Proto.PORT_UNSTABLE != 0 -> "Unstable sensor signature"
+        else -> "Ready"
+    }
+}
+
+data class HealthStatus(
+    val channel1: PortHealth,
+    val channel2: PortHealth,
+    val checkedAtBootMs: Long,
+) {
+    val ready: Boolean get() = checkedAtBootMs > 0 && !channel1.serious && !channel2.serious
+}
+
+enum class SimFault(val label: String) {
+    NONE("No fault"),
+    STUCK_HIGH_1("CH1 stuck high"),
+    SHORT_GROUND_1("CH1 leakage/short"),
+    UNSTABLE_1("CH1 unstable"),
+    CROSS_CHANNEL("Channels coupled"),
+    MISSING_1("CH1 sensor missing"),
+    MISSING_2("CH2 sensor missing"),
+    STOP_BEFORE_START("STOP before START"),
+    STOP_TIMEOUT("STOP timeout"),
+    SPLIT_OUT_OF_RANGE("Impossible split"),
+}
 
 /**
  * Self-reported identity and timing spec of the connected hardware. The app
@@ -84,6 +159,9 @@ data class HwInfo(
     val clockPpm: Int,        // crystal tolerance
     val edgeJitterNs: Int,    // per-edge front-end uncertainty
     val mcuSerial: String = "",
+    val channelCount: Int = 2,
+    val inputStage: Int = 1,
+    val capabilities: Int = 0,
 ) {
     companion object {
         /** Assumed when the device predates the INFO characteristic. */
@@ -119,6 +197,7 @@ class ChronoBle(private val context: Context) {
     val results = MutableSharedFlow<RawResult>(extraBufferCapacity = 32)
     val cal = MutableSharedFlow<CalReading>(extraBufferCapacity = 8)
     val hwInfo = MutableStateFlow<HwInfo?>(null)
+    val health = MutableStateFlow<HealthStatus?>(null)
     val found = MutableStateFlow<List<FoundDevice>>(emptyList())
 
     val adapter: BluetoothAdapter?
@@ -134,6 +213,23 @@ class ChronoBle(private val context: Context) {
     private var chTime: BluetoothGattCharacteristic? = null
     private var chCal: BluetoothGattCharacteristic? = null
     private var chInfo: BluetoothGattCharacteristic? = null
+    private var chHealth: BluetoothGattCharacteristic? = null
+    private var smoothedBatteryMv: Int? = null
+    private var smoothedBatteryPercent: Int? = null
+
+    val deviceStorageKey: String
+        get() = if (isSimulation) "SIM-0001"
+        else hwInfo.value?.mcuSerial?.takeIf { it.isNotBlank() }
+            ?: prefs.getString("lastDeviceAddress", "unknown")!!.replace(":", "")
+
+    fun nicknameFor(address: String): String = prefs.getString("nickname_$address", "").orEmpty()
+    fun setNickname(address: String, nickname: String) {
+        prefs.edit().putString("nickname_$address", nickname.trim()).apply()
+        found.value = found.value.toList()
+    }
+
+    fun wasLastConnected(address: String): Boolean =
+        prefs.getString("lastSuccessfulAddress", null) == address
 
     // ------------------------------------------------------------ scanning
 
@@ -191,6 +287,7 @@ class ChronoBle(private val context: Context) {
             isSimulation = false
             status.value = null
             hwInfo.value = null
+            health.value = null
             connState.value = ConnState.DISCONNECTED
             return
         }
@@ -200,6 +297,9 @@ class ChronoBle(private val context: Context) {
         gatt = null
         status.value = null
         hwInfo.value = null
+        health.value = null
+        smoothedBatteryMv = null
+        smoothedBatteryPercent = null
         connState.value = ConnState.DISCONNECTED
     }
 
@@ -225,6 +325,8 @@ class ChronoBle(private val context: Context) {
     private var simTimeValid = false
     private var simNextId = 1
     private var simBarePhase = true
+    var simFault = SimFault.NONE
+        private set
     private val simBufferedResults = mutableListOf<RawResult>()
 
     fun connectSimulated() {
@@ -239,7 +341,8 @@ class ChronoBle(private val context: Context) {
         simTimeValid = false
         simBarePhase = true
         simBufferedResults.clear()
-        hwInfo.value = HwInfo(1, 1, 4, 62_500, 30, 300, "SIM-0001")   // training identity
+        hwInfo.value = HwInfo(2, 2, 0, 62_500, 30, 300, "SIM-0001", 2, 1, 0x0007)
+        setSimFault(SimFault.NONE)
         pushSimStatus()
         connState.value = ConnState.CONNECTED
     }
@@ -275,11 +378,34 @@ class ChronoBle(private val context: Context) {
         status.value = DeviceStatus(simState, simPending, simTimeValid, batteryPercent = 82, batteryMv = 3990)
     }
 
+    fun setSimFault(fault: SimFault) {
+        simFault = fault
+        val flags1 = when (fault) {
+            SimFault.STUCK_HIGH_1 -> Proto.PORT_STUCK_HIGH
+            SimFault.SHORT_GROUND_1 -> Proto.PORT_LEAK_OR_SHORT
+            SimFault.UNSTABLE_1 -> Proto.PORT_UNSTABLE
+            SimFault.CROSS_CHANNEL -> Proto.PORT_CROSS_COUPLED
+            SimFault.MISSING_1 -> Proto.PORT_MISSING_SENSOR
+            else -> 0
+        }
+        val flags2 = when (fault) {
+            SimFault.CROSS_CHANNEL -> Proto.PORT_CROSS_COUPLED
+            SimFault.MISSING_2 -> Proto.PORT_MISSING_SENSOR
+            else -> 0
+        }
+        health.value = HealthStatus(
+            PortHealth(flags1, if (flags1 and Proto.PORT_MISSING_SENSOR != 0) 800 else 205_000),
+            PortHealth(flags2, if (flags2 and Proto.PORT_MISSING_SENSOR != 0) 900 else 211_000),
+            android.os.SystemClock.elapsedRealtime(),
+        )
+    }
+
     private fun simCommand(cmd: Byte, arg: Int) {
         when (cmd) {
             Proto.CMD_VERIFY1 -> simVerify(1)
             Proto.CMD_VERIFY2 -> simVerify(2)
             Proto.CMD_ARM -> simArm()
+            Proto.CMD_ARM_OVERRIDE -> simArm(overrideFaults = true)
             Proto.CMD_DISARM, Proto.CMD_CANCEL -> {
                 simJob?.cancel()
                 simState = Proto.ST_IDLE
@@ -291,6 +417,8 @@ class ChronoBle(private val context: Context) {
             }
             Proto.CMD_FETCH -> flushSimBufferedResults()
             Proto.CMD_CALIBRATE -> simCalibrate(arg)
+            Proto.CMD_HEALTH -> { setSimFault(simFault); pushSimStatus() }
+            Proto.CMD_IDENTIFY -> Unit
         }
     }
 
@@ -309,7 +437,7 @@ class ChronoBle(private val context: Context) {
             simState = Proto.ST_CALIBRATING
             pushSimStatus()
             delay(900)
-            val base = if (bare) 430L + channel * 25L else 4600L + channel * 240L
+            val base = if (bare) 1_800L + channel * 80L else 205_000L + channel * 4_000L
             val median = base + (-25L..25L).random()
             cal.tryEmit(
                 CalReading(
@@ -341,25 +469,58 @@ class ChronoBle(private val context: Context) {
         }
     }
 
-    private fun simArm() {
+    private fun simArm(overrideFaults: Boolean = false) {
         simJob?.cancel()
+        setSimFault(simFault)
+        if (health.value?.ready == false && !overrideFaults) {
+            simState = Proto.ST_FAULT
+            pushSimStatus()
+            return
+        }
         simState = Proto.ST_ARMED
         pushSimStatus()
         simJob = simScope.launch {
             delay(1800)                    // waiting for the shot
+            if (simFault == SimFault.STOP_BEFORE_START) {
+                emitSimFaultResult(Proto.RESULT_STOP_BEFORE_START)
+                return@launch
+            }
             simState = Proto.ST_RUNNING
             pushSimStatus()
+            if (simFault == SimFault.STOP_TIMEOUT) {
+                delay(1000)
+                emitSimFaultResult(Proto.RESULT_STOP_TIMEOUT)
+                return@launch
+            }
             delay(350)                     // shot in flight
-            val split = simSplitNs()
+            val split = if (simFault == SimFault.SPLIT_OUT_OF_RANGE) 5_000L else simSplitNs()
             val epoch = if (simTimeValid) System.currentTimeMillis() / 1000L else 0L
             simPending++
             pushSimStatus()
-            val result = RawResult(simNextId++, split, epoch)
+            val flags = (if (overrideFaults) Proto.RESULT_ARM_OVERRIDE else 0) or
+                (if (health.value?.ready == false) Proto.RESULT_PORT_WARNING else 0) or
+                (if (split < 10_000L) Proto.RESULT_SPLIT_TOO_SHORT else 0)
+            val result = RawResult(simNextId++, split, epoch, flags = flags,
+                startTicks = 1000, stopTicks = 1000 + split / 62, batteryMv = 3990,
+                bootId = 0x53494D31, hwRev = 2, fwMajor = 2, formatVersion = 2)
             if (connState.value == ConnState.CONNECTED) results.tryEmit(result)
             else simBufferedResults.add(result)
             simState = Proto.ST_IDLE
             pushSimStatus()
         }
+    }
+
+    private fun emitSimFaultResult(flag: Int) {
+        val epoch = if (simTimeValid) System.currentTimeMillis() / 1000L else 0L
+        simPending++
+        val result = RawResult(simNextId++, 0, epoch, flags = flag,
+            startTicks = if (flag == Proto.RESULT_STOP_TIMEOUT) 1000 else 0,
+            batteryMv = 3990, bootId = 0x53494D31, hwRev = 2, fwMajor = 2,
+            formatVersion = 2)
+        if (connState.value == ConnState.CONNECTED) results.tryEmit(result)
+        else simBufferedResults.add(result)
+        simState = Proto.ST_FAULT
+        pushSimStatus()
     }
 
     private fun flushSimBufferedResults() {
@@ -467,6 +628,14 @@ class ChronoBle(private val context: Context) {
         }
     }
 
+    private fun readHealth() {
+        enqueue {
+            val g = gatt ?: return@enqueue false
+            val c = chHealth ?: return@enqueue false
+            g.readCharacteristic(c)
+        }
+    }
+
     // ------------------------------------------------------- GATT callbacks
 
     private val gattCb = object : BluetoothGattCallback() {
@@ -510,6 +679,7 @@ class ChronoBle(private val context: Context) {
             chTime = svc.getCharacteristic(Proto.TIME)
             chCal = svc.getCharacteristic(Proto.CAL)    // optional (newer firmware)
             chInfo = svc.getCharacteristic(Proto.INFO)  // optional (newer firmware)
+            chHealth = svc.getCharacteristic(Proto.HEALTH) // optional (protocol v2)
             if (chStatus == null || chControl == null || chResult == null || chTime == null) {
                 g.disconnect()
                 return
@@ -517,11 +687,17 @@ class ChronoBle(private val context: Context) {
             enableNotifications(chStatus!!)
             enableNotifications(chResult!!)
             chCal?.let { enableNotifications(it) }
+            chHealth?.let { enableNotifications(it) }
             readStatus()
             readInfo()
+            readHealth()
             syncTime()                        // sync clock on every (re)connect
             sendCommand(Proto.CMD_FETCH)      // collect results recorded while disconnected
             enqueue {
+                prefs.edit()
+                    .putString("lastSuccessfulAddress", g.device.address)
+                    .putLong("lastConnectedAt_${g.device.address}", System.currentTimeMillis())
+                    .apply()
                 connState.value = ConnState.CONNECTED
                 false // action-only op: report "didn't start a GATT call" so the queue moves on
             }
@@ -546,16 +722,34 @@ class ChronoBle(private val context: Context) {
     private fun handleValue(uuid: UUID, v: ByteArray) {
         when (uuid) {
             Proto.STATUS -> if (v.size >= 3) {
-                val batteryPercent = if (v.size >= 4) v[3].toInt() and 0xFF else null
-                val batteryMv = if (v.size >= 6) {
-                    ByteBuffer.wrap(v, 4, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt() and 0xFFFF
+                val reportedPercent = if (v.size >= 4) (v[3].toInt() and 0xFF)
+                    .takeUnless { it == 0xFF } else null
+                val rawBatteryMv = if (v.size >= 6) {
+                    (ByteBuffer.wrap(v, 4, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt() and 0xFFFF)
+                        .takeUnless { it == 0xFFFF }
                 } else null
+                val batteryMv = rawBatteryMv?.let { raw ->
+                    val previous = smoothedBatteryMv
+                    (if (previous == null) raw else ((previous * 4L + raw) / 5L).toInt())
+                        .also { smoothedBatteryMv = it }
+                }
+                val targetPercent = batteryMv?.let(::batteryPercentFromMv) ?: reportedPercent
+                val batteryPercent = targetPercent?.let { target ->
+                    val previous = smoothedBatteryPercent
+                    when {
+                        previous == null -> target
+                        target > previous + 2 -> target
+                        target < previous - 2 -> target
+                        else -> previous
+                    }.also { smoothedBatteryPercent = it }
+                }
                 status.value = DeviceStatus(
                     state = v[0].toInt() and 0xFF,
                     pendingCount = v[1].toInt() and 0xFF,
                     timeValid = v[2].toInt() != 0,
                     batteryPercent = batteryPercent,
                     batteryMv = batteryMv,
+                    batteryLocked = v.size >= 7 && v[6].toInt() != 0,
                 )
             }
             Proto.RESULT -> if (v.size >= 11) {
@@ -563,7 +757,27 @@ class ChronoBle(private val context: Context) {
                 val id = b.short.toInt() and 0xFFFF
                 val splitNs = b.int.toLong() and 0xFFFFFFFFL
                 val epochSec = b.int.toLong() and 0xFFFFFFFFL
-                results.tryEmit(RawResult(id, splitNs, epochSec))
+                val flags = b.get().toInt() and 0xFF
+                if (v.size >= 37) {
+                    val startTicks = b.int.toLong() and 0xFFFFFFFFL
+                    val stopTicks = b.int.toLong() and 0xFFFFFFFFL
+                    val batteryMv = (b.short.toInt() and 0xFFFF).takeUnless { it == 0xFFFF }
+                    val portFlags = b.short.toInt() and 0xFFFF
+                    val bootId = b.int.toLong() and 0xFFFFFFFFL
+                    val resetCause = b.int.toLong() and 0xFFFFFFFFL
+                    val hwRev = b.get().toInt() and 0xFF
+                    val fwMajor = b.get().toInt() and 0xFF
+                    val fwMinor = b.get().toInt() and 0xFF
+                    val formatVersion = b.get().toInt() and 0xFF
+                    val packetCrc = b.short.toInt() and 0xFFFF
+                    results.tryEmit(
+                        RawResult(id, splitNs, epochSec, flags, startTicks, stopTicks,
+                            batteryMv, portFlags, bootId, resetCause, hwRev, fwMajor,
+                            fwMinor, formatVersion, packetCrc == crc16Ccitt(v, 35))
+                    )
+                } else {
+                    results.tryEmit(RawResult(id, splitNs, epochSec, flags))
+                }
             }
             Proto.CAL -> if (v.size >= 20) {
                 val b = ByteBuffer.wrap(v).order(ByteOrder.LITTLE_ENDIAN)
@@ -590,8 +804,41 @@ class ChronoBle(private val context: Context) {
                     val id1 = b.int.toLong() and 0xFFFFFFFFL
                     "%08X%08X".format(id1, id0)
                 } else ""
-                hwInfo.value = HwInfo(hwRev, fwMajor, fwMinor, tickPs, clockPpm, edgeJitterNs, serial)
+                val channelCount = if (v.size >= 21) b.get().toInt() and 0xFF else 2
+                val inputStage = if (v.size >= 22) b.get().toInt() and 0xFF else 1
+                val capabilities = if (v.size >= 24) b.short.toInt() and 0xFFFF else 0
+                hwInfo.value = HwInfo(hwRev, fwMajor, fwMinor, tickPs, clockPpm,
+                    edgeJitterNs, serial, channelCount, inputStage, capabilities)
+            }
+            Proto.HEALTH -> if (v.size >= 18) {
+                val b = ByteBuffer.wrap(v).order(ByteOrder.LITTLE_ENDIAN)
+                b.get() // packet version
+                b.get() // channel count
+                val flags1 = b.short.toInt() and 0xFFFF
+                val flags2 = b.short.toInt() and 0xFFFF
+                val signature1 = b.int.toLong() and 0xFFFFFFFFL
+                val signature2 = b.int.toLong() and 0xFFFFFFFFL
+                val checkedAt = b.int.toLong() and 0xFFFFFFFFL
+                health.value = HealthStatus(
+                    PortHealth(flags1, signature1), PortHealth(flags2, signature2), checkedAt
+                )
             }
         }
+    }
+
+    private fun crc16Ccitt(data: ByteArray, length: Int): Int {
+        var crc = 0xFFFF
+        for (index in 0 until length.coerceAtMost(data.size)) {
+            crc = crc xor ((data[index].toInt() and 0xFF) shl 8)
+            repeat(8) { crc = if (crc and 0x8000 != 0) (crc shl 1) xor 0x1021 else crc shl 1 }
+            crc = crc and 0xFFFF
+        }
+        return crc
+    }
+
+    private fun batteryPercentFromMv(mv: Int): Int = when {
+        mv >= 4200 -> 100
+        mv <= 3300 -> 0
+        else -> (((mv - 3300) * 100L + 450L) / 900L).toInt().coerceIn(0, 100)
     }
 }

@@ -7,6 +7,13 @@ sensors, a rechargeable 1S battery, and a sealed pogo charging adapter.
 The current firmware and app are still two-channel. This document is the
 hardware target for the next firmware/app update.
 
+Current PCB planning has split into two nRF52840 variants: a two-channel
+unbuffered board and a four-channel high-speed buffered board. See
+`docs/NRF52840_BOARD_VARIANTS.md` for the shared layout target and the buffered
+input-stage notes. This waterproof entry-build guide still applies to the
+four-channel pin grouping, battery, charging, enclosure, and serviceability
+decisions.
+
 ## Design Goals
 
 1. Four piezo input channels.

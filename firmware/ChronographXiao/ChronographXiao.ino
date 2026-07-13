@@ -1,3 +1,5 @@
+#define CHRONO_BOARD_PROFILE 2  // XIAO nRF52840, external D5 LED, 1S LiPo ADC
+
 /*
  * Chrono — BLE chronograph firmware for the two-channel nRF52840 logger
  * ---------------------------------------------------------------------
@@ -29,11 +31,7 @@
  *   Pins use the internal pull-DOWN; a trigger is any rising edge past the
  *   input threshold. Match the two channels (piezo, clamp, CABLE LENGTH).
  *
- * Supported builds:
- *   ChronographNiceNano/ChronographNiceNano.ino - nice!nano v2, 1S LiPo
- *   ChronographXiao/ChronographXiao.ino         - XIAO nRF52840, 1S LiPo
- *
- * Both use a Bluefruit-compatible nRF52840 Arduino core.
+ * XIAO nRF52840 build. This sketch selects the XIAO board profile above.
  */
 
 // Arduino generates function prototypes before the later packet definitions.
