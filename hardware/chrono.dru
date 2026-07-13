@@ -1,0 +1,44 @@
+description[en] = <b>Chrono 2-layer</b><p>Global clearance/size floor for the sensor board. Per-net widths and clearances come from the net classes (chrono_netclasses.scr); this only sets the board-wide minimum.</p>
+
+layerSetup = (1*16)
+mtCopper = 0.035mm
+mtIsolate = 1.5mm
+
+# --- Clearance: different signals (board-wide floor; net classes raise it per net) ---
+mdWireWire = 0.20mm
+mdWirePad = 0.20mm
+mdWireVia = 0.20mm
+mdPadPad = 0.20mm
+mdPadVia = 0.20mm
+mdViaVia = 0.20mm
+mdSmdPad = 0.20mm
+mdSmdVia = 0.20mm
+mdSmdSmd = 0.20mm
+mdViaViaSameLayer = 0.20mm
+mnLayersViaInSmd = 2
+mdCopperDimension = 0.40mm
+mdDrill = 0.25mm
+
+# --- Minimum sizes ---
+msWidth = 0.15mm
+msDrill = 0.30mm
+msMicroVia = 9.99mm
+
+# --- Restring (annular ring) ---
+rvPadTop = 0.25
+rvPadInner = 0.25
+rvPadBottom = 0.25
+rlMinPadTop = 0.20mm
+rlMaxPadTop = 20mm
+rlMinPadInner = 0.20mm
+rlMaxPadInner = 20mm
+rlMinPadBottom = 0.20mm
+rlMaxPadBottom = 20mm
+rvViaOuter = 0.25
+rlMinViaOuter = 0.20mm
+rlMaxViaOuter = 2mm
+
+checkGrid = 0
+checkAngle = 0
+checkFont = 1
+checkRestrict = 1

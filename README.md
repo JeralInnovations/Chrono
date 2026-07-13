@@ -13,6 +13,7 @@ native **Android app** over Bluetooth Low Energy.
 Chrono/
 ├── firmware/Chronograph/Chronograph.ino   ← flash this to the nice!nano
 ├── android/                               ← open this folder in Android Studio
+├── hardware/                              ← PCB design, BOM, protection front-end
 └── README.md
 ```
 
@@ -24,6 +25,9 @@ Additional guides:
   inexpensive brass piezo sensors for the entry and advanced builds.
 - `docs/FOUR_CHANNEL_WATERPROOF_BUILD.md` lays out the planned four-channel
   waterproof XIAO nRF52840 entry build with battery and pogo charging.
+- [hardware/README.md](hardware/README.md) — the economical two-channel board
+  design: per-port piezo protection (TVS + Schottky clamps + bleed), BOM with
+  part numbers, net-class/DRC files, and layout guidance.
 
 ---
 

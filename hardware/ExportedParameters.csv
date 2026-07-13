@@ -1,0 +1,93 @@
+Netlist
+
+Exported from ChronoPcbSMD.sch at 7/11/2026 11:40 PM
+
+EAGLE Version 9.7.0 Copyright (c) 1988-2026 Autodesk, Inc.
+
+Net      Part     Pad      Pin        Sheet
+
+3V3      D3       2        C          1
+         D6       2        C          1
+         U1       12       3V3        1
+         U1       3.3      3V3        1
+
+D0       D2       2        C          1
+         D3       1        A          1
+         R2       2        2          1
+         R3       2        2          1
+         U1       1        P0.02_A0_D0 1
+         U1       D0       P0.02_A0_D0 1
+
+D1       D5       2        C          1
+         D6       1        A          1
+         R5       2        2          1
+         R6       2        2          1
+         U1       2        P0.03_A1_D1 1
+         U1       D1       P0.03_A1_D1 1
+
+D2       R3       1        1          1
+         U1       3        P0.28_A2_D2 1
+         U1       D2       P0.28_A2_D2 1
+
+D3       R6       1        1          1
+         U1       4        P0.29_A3_D3 1
+         U1       D3       P0.29_A3_D3 1
+
+D4       SW1      1        1          1
+         U1       5        P0.04_A4_D4_SDA 1
+         U1       D4       P0.04_A4_D4_SDA 1
+
+GND      D1       1        A          1
+         D2       1        A          1
+         D4       1        A          1
+         D5       1        A          1
+         J2       2        2          1
+         J3       2        2          1
+         R1       1        1          1
+         R4       1        1          1
+         R7       1        1          1
+         SW1      3        3          1
+         U1       13       GND        1
+         U1       GND      GND        1
+
+N$1      D1       2        C          1
+         J2       1        1          1
+         R1       2        2          1
+         R2       1        1          1
+
+N$2      D4       2        C          1
+         J3       1        1          1
+         R4       2        2          1
+         R5       1        1          1
+
+N$3      J1       1        1          1
+         U1       22       BATT+      1
+
+N$4      J1       2        2          1
+         U1       21       BATT-      1
+
+N$5      D7       2        C          1
+         R7       2        2          1
+
+N$9      D7       1        A          1
+         U1       6        P0.05_A5_D5_SCL 1
+         U1       D5       P0.05_A5_D5_SCL 1
+
+N$10     U1       7        P1.11_D6_TX 1
+         U1       D6       P1.11_D6_TX 1
+
+N$11     U1       14       5V         1
+         U1       5V       5V         1
+
+N$13     U1       11       P1.15_D10_MOSI 1
+         U1       D10      P1.15_D10_MOSI 1
+
+N$14     U1       10       P1.14_D9_MISO 1
+         U1       D9       P1.14_D9_MISO 1
+
+N$15     U1       9        P1.13_D8_SCK 1
+         U1       D8       P1.13_D8_SCK 1
+
+N$16     U1       8        P1.12_D7_RX 1
+         U1       D7       P1.12_D7_RX 1
+

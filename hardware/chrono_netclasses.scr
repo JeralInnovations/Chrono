@@ -1,0 +1,10 @@
+# Chrono — net class definitions
+# Run in the SCHEMATIC editor:  File > Execute Script...   (or type: SCRIPT chrono_netclasses.scr)
+# Creates classes 1-5 with width / drill / clearance (mm). Class 0 (Default) is left as-is.
+# CLASS syntax:  CLASS <number> '<name>' <width> <drill> <clearance>;
+
+CLASS 1 'Power'     0.40mm 0.40mm 0.20mm;
+CLASS 2 'Sensor_HV' 0.30mm 0.30mm 0.40mm;
+CLASS 3 'Timing'    0.25mm 0.30mm 0.30mm;
+CLASS 4 'Signal'    0.20mm 0.30mm 0.20mm;
+CLASS 5 'GND'       0.40mm 0.40mm 0.20mm;
