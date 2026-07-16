@@ -39,6 +39,10 @@ Additional guides:
 - `docs/NRF52840_BOARD_VARIANTS.md` captures the current two-board PCB layout
   target: a two-channel unbuffered nRF52840 board and a four-channel buffered
   nRF52840 board.
+- `docs/ADVANCED_FOUR_CHANNEL_BUFFERED.md` is the full component/connection
+  plan for the buffered board: window-comparator front-end (any polarity, any
+  reasonable piezo), adjustable sensitivity, BOM, pin map, and firmware/app
+  deltas.
 - `docs/PIEZO_INPUT_PROTECTION.md` records the recommended two-stage piezo
   input protection path and validation plan.
 - `docs/FOUR_CHANNEL_WATERPROOF_BUILD.md` lays out the planned four-channel
