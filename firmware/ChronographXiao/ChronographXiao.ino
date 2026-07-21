@@ -552,17 +552,53 @@ uint16_t readBatteryMv() {
   return (uint16_t)mv;
 #else
   // The XIAO battery pads feed its 1S LiPo charger and a 2.961:1 monitor
-  // divider. LOW enables the divider; keeping it LOW also avoids exposing
-  // P0.31 to the un-divided battery rail while USB charging is present.
+  // divider (1M/510k). LOW enables the divider; keeping it LOW also avoids
+  // exposing P0.31 to the un-divided battery rail while USB charging.
+  //
+  // IMPORTANT: the divider's ~340k source impedance is far above what the
+  // core's analogRead() 3 us acquisition window can charge, so it under-reads
+  // by 10-20% — enough to trip the 3.40 V arm lock while the battery is
+  // really at ~3.8 V. Read the channel directly with a 40 us acquisition
+  // window and 8x hardware burst oversampling instead. (PIN_VBAT = P0.31 =
+  // SAADC AIN7; gain 1/6 against the 0.6 V internal reference gives the same
+  // 3.6 V full scale the old math assumed.)
   pinMode(PIN_VBAT_ENABLE, OUTPUT);
   digitalWrite(PIN_VBAT_ENABLE, LOW);
   pinMode(PIN_VBAT, INPUT);
-  analogReference(AR_DEFAULT);  // nRF52 ADC full scale: 3.6 V
-  analogReadResolution(12);
-  delay(10);                    // allow the divider and ADC input to settle
-  uint32_t raw = analogRead(PIN_VBAT);
+  delay(2);                     // divider settle after enable
+
+  NRF_SAADC->RESOLUTION = SAADC_RESOLUTION_VAL_12bit;
+  NRF_SAADC->OVERSAMPLE = SAADC_OVERSAMPLE_OVERSAMPLE_Over8x;
+  NRF_SAADC->CH[0].PSELP = SAADC_CH_PSELP_PSELP_AnalogInput7;
+  NRF_SAADC->CH[0].PSELN = SAADC_CH_PSELN_PSELN_NC;
+  NRF_SAADC->CH[0].CONFIG =
+      (SAADC_CH_CONFIG_RESP_Bypass     << SAADC_CH_CONFIG_RESP_Pos) |
+      (SAADC_CH_CONFIG_RESN_Bypass     << SAADC_CH_CONFIG_RESN_Pos) |
+      (SAADC_CH_CONFIG_GAIN_Gain1_6    << SAADC_CH_CONFIG_GAIN_Pos) |
+      (SAADC_CH_CONFIG_REFSEL_Internal << SAADC_CH_CONFIG_REFSEL_Pos) |
+      (SAADC_CH_CONFIG_TACQ_40us       << SAADC_CH_CONFIG_TACQ_Pos) |
+      (SAADC_CH_CONFIG_MODE_SE         << SAADC_CH_CONFIG_MODE_Pos) |
+      (SAADC_CH_CONFIG_BURST_Enabled   << SAADC_CH_CONFIG_BURST_Pos);
+
+  volatile int16_t sample = 0;
+  NRF_SAADC->RESULT.PTR = (uint32_t)&sample;
+  NRF_SAADC->RESULT.MAXCNT = 1;
+  NRF_SAADC->ENABLE = SAADC_ENABLE_ENABLE_Enabled;
+  NRF_SAADC->EVENTS_STARTED = 0;
+  NRF_SAADC->TASKS_START = 1;
+  while (!NRF_SAADC->EVENTS_STARTED) {}
+  NRF_SAADC->EVENTS_END = 0;
+  NRF_SAADC->TASKS_SAMPLE = 1;          // burst: 8 conversions, averaged in HW
+  while (!NRF_SAADC->EVENTS_END) {}
+  NRF_SAADC->EVENTS_STOPPED = 0;
+  NRF_SAADC->TASKS_STOP = 1;
+  while (!NRF_SAADC->EVENTS_STOPPED) {}
+  NRF_SAADC->ENABLE = SAADC_ENABLE_ENABLE_Disabled;
+
+  int32_t raw = sample;
+  if (raw < 0) raw = 0;
   // 2.961 divider ratio * 3.6 V ADC range, converted to millivolts.
-  uint32_t mv = (raw * 10660UL + 2048UL) / 4096UL;
+  uint32_t mv = ((uint32_t)raw * 10660UL + 2048UL) / 4096UL;
   return (uint16_t)mv;
 #endif
 }
