@@ -263,9 +263,6 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private val setupDone: Boolean
-        get() = prefs.getBoolean("setupDone_${ble.deviceStorageKey}", false)
-
     val isSimulation: Boolean get() = ble.isSimulation
 
     // --------------------------------------------------------- calibration
@@ -333,9 +330,12 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
 
-        // A camera capture can kill the process mid-session; restore that prompt.
+        // A camera capture can kill the process mid-session. A persisted prompt
+        // is itself proof that setup reached the dashboard; do not consult the
+        // device-scoped setupDone key here because the MCU serial is not known
+        // until BLE reconnects and deviceStorageKey temporarily uses the address.
         photoPrompt = prefs.getString("photoPrompt", null)
-        if (photoPrompt != null && setupDone) {
+        if (photoPrompt != null) {
             startupRoutingPending = false
             resetReadinessThisLaunch = false
             screen = Screen.DASHBOARD
@@ -881,7 +881,6 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit()
             .putFloat("distanceValue", value.toFloat())
             .putString("unit", unit.name)
-            .putBoolean("setupDone_${ble.deviceStorageKey}", true)
             .apply()
         screen = Screen.DASHBOARD
         if (inWizard) {
