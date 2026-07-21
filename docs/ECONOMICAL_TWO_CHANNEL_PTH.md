@@ -14,7 +14,7 @@ Chrono Logger PCB. It supersedes the earlier low-capacitance TVS, BAT54S, and
 | STOP timing input | D1 |
 | START charge/test | D2 through 10k 1% |
 | STOP charge/test | D3 through 10k 1% |
-| Wake/user button | D4 to GND; firmware pull-up |
+| Reset/cancel button | D4 to GND; firmware pull-up; press to return logger to idle |
 | External status LED | D5 through 330 ohms |
 | Reserved UART | D6/D7 |
 | Available/remappable I2C | D8/D9 |
@@ -69,8 +69,8 @@ the leakage.
 The XIAO's onboard 1S-LiPo path supplies both charging and pack-voltage
 measurement. Firmware holds `PIN_VBAT_ENABLE` (D14 / P0.14) low, then reads
 `PIN_VBAT` (D32 / P0.31) through the board's approximately 2.961:1 divider.
-It filters the measurement and enforces the same low-battery arm lockout as the
-nice!nano profile. Do not apply an AA pack to `3V3`; that pin is the XIAO
+It filters the measurement for display, warnings, and result records. Low
+voltage never blocks arming. Do not apply an AA pack to `3V3`; that pin is the XIAO
 regulator output. The 3V3 output still supplies the upper piezo steering clamps
 exactly as shown in the input network.
 
@@ -89,10 +89,9 @@ The high-frequency crystal must report running before the logger enters the
 armed state. Results include raw START/STOP timer captures, fault flags, logger
 and boot identity, reset cause, revisions, packet format, and CRC.
 
-Battery voltage is filtered in firmware. A new arm is refused at or below
-`3.40 V` and stays refused until the filtered reading reaches `3.50 V`. This
-hysteresis avoids repeatedly toggling the lockout around one voltage. The
-logged diagnostic override does not bypass battery lockout.
+Battery voltage is filtered in firmware and shown as a warning when low. The
+logger still accepts an arm and attempts to capture a shot for as long as its
+supply remains high enough to operate.
 
 ## Feature Boundary
 
@@ -105,7 +104,7 @@ Implemented for this board:
 - per-logger calibration/readiness records with a 30-day age limit;
 - simulation fault selection;
 - diagnostic/result export with device and raw timing metadata;
-- filtered battery reporting, per-result voltage, and critical-battery arm lockout.
+- filtered battery reporting, per-result voltage, and a warning-only low-battery state.
 
 Deferred because this PCB lacks the required hardware or validation:
 

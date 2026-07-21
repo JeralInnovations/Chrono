@@ -24,8 +24,8 @@ Chrono/
 
 | Hardware | Sketch | Power and battery behavior | LED |
 |---|---|---|---|
-| Original nice!nano v2 logger | `firmware/ChronographNiceNano/ChronographNiceNano.ino` | 1S LiPo on the board battery/input rail. Firmware reads VDDH with `analogReadVDDHDIV5()` and applies the 3.40 V / 3.50 V arm-lock hysteresis. | GPIO 15 |
-| Economical two-channel PTH logger | `firmware/ChronographXiao/ChronographXiao.ino` | Protected 1S LiPo on the XIAO `BAT+`/`BAT-` pads. Firmware reads the onboard divider and applies the 3.40 V / 3.50 V arm-lock hysteresis. Never feed `3V3`. | D5 through 330 ohms |
+| Original nice!nano v2 logger | `firmware/ChronographNiceNano/ChronographNiceNano.ino` | 1S LiPo on the board battery/input rail. Firmware reads VDDH and reports a low-voltage warning without blocking operation. | GPIO 15 |
+| Economical two-channel PTH logger | `firmware/ChronographXiao/ChronographXiao.ino` | Protected 1S LiPo on the XIAO `BAT+`/`BAT-` pads. Firmware reads the onboard divider and reports a low-voltage warning without blocking operation. Never feed `3V3`. | D5 through 330 ohms |
 
 Both builds use D0/D1 for timing, D2/D3 for RC diagnostics, and D4 for the
 button. The XIAO board reserves D6/D7 for UART and D8/D9 for remappable I2C.
@@ -128,8 +128,8 @@ same piezo type, same clamp diodes, and **the same cable length** (~5 ns/m).
 
 | Function | Connection |
 |---|---|
-| Wake/user button | XIAO D4 to momentary switch to GND |
-| Status LED | XIAO D5 through 330 ohms to LED anode; LED cathode to GND |
+| Reset/cancel button | XIAO D4 to momentary switch to GND; press to cancel any active operation and return the logger to idle |
+| Status LED | XIAO D5 through 330 ohms to LED anode; LED cathode to GND. Off idle, slow blink armed, solid while timing/checking, double blink fault, fast flash Identify |
 | UART reserved | D6 TX and D7 RX |
 | Remappable I2C | D8/D9 |
 
@@ -172,8 +172,8 @@ and flashes rapidly for the app's Identify command.
 4. Select *nice!nano nRF52 -> nice!nano v2* and upload normally.
 
 This build expects a protected 1S LiPo on the nice!nano battery/input rail. Its
-board-specific firmware reads that rail and blocks a new arm at or below 3.40 V;
-the lock releases only after a filtered reading of at least 3.50 V.
+board-specific firmware reads and reports that voltage. Low voltage produces an
+app warning but never blocks a new arm.
 
 ---
 
@@ -351,11 +351,12 @@ marks the session. Tap *Disconnect* to leave.
 - **Power-loss boundary** — results are retained through BLE loss and are deleted
   only after the app stores and acknowledges them. The current queue is still in
   RAM, so complete logger power loss before collection can lose pending results.
-- **Battery lockout** — both builds use a protected 1S LiPo and refuse a new
-  arm at or below 3.40 V, releasing it after a filtered reading reaches 3.50 V.
-  The nice!nano reads VDDH with `analogReadVDDHDIV5()`; the XIAO reads its
-  onboard BAT divider with `PIN_VBAT` and `PIN_VBAT_ENABLE`. An in-progress
-  shot is never interrupted.
+- **Battery warning** — both builds measure their protected 1S LiPo and warn in
+  the app when voltage is low. Battery level never blocks arming; the logger
+  keeps trying to capture until its supply can no longer sustain operation.
+- **Fresh app launch** — after connecting, the app starts the setup workflow
+  with sensor readiness unknown. It resumes the dashboard only when the logger
+  is already armed/running or has pending shot data to upload.
 
 ## 6. BLE protocol (for reference / hacking)
 
@@ -363,7 +364,7 @@ Service `a5c40001-9d95-4e4c-8c5a-c1d6f2a80de1`
 
 | Characteristic | UUID (…-9d95-4e4c-8c5a-c1d6f2a80de1) | Access | Payload |
 |---|---|---|---|
-| Status  | `a5c40002` | read/notify | `state, pendingCount, timeValid, batteryPercent, batteryMv, batteryArmLocked` |
+| Status  | `a5c40002` | read/notify | `state, pendingCount, timeValid, batteryPercent, batteryMv, legacyBatteryLock`; the final byte is always 0 in firmware 2.2+ |
 | Control | `a5c40003` | write | `[cmd, argLo, argHi]` |
 | Result  | `a5c40004` | read/notify | v1 prefix plus raw ticks, battery, port flags, boot/reset IDs, revisions, format, CRC |
 | Time    | `a5c40005` | write | unix seconds `u32` (LE) |

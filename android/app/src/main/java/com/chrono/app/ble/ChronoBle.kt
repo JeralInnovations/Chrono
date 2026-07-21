@@ -84,10 +84,9 @@ data class DeviceStatus(
     val timeValid: Boolean,
     val batteryPercent: Int? = null,
     val batteryMv: Int? = null,
-    val batteryLocked: Boolean = false,
 ) {
     val lowBattery: Boolean
-        get() = batteryLocked || (batteryPercent != null && batteryPercent <= 15) ||
+        get() = (batteryPercent != null && batteryPercent <= 15) ||
             (batteryMv != null && batteryMv in 1..3499)
 }
 
@@ -749,7 +748,6 @@ class ChronoBle(private val context: Context) {
                     timeValid = v[2].toInt() != 0,
                     batteryPercent = batteryPercent,
                     batteryMv = batteryMv,
-                    batteryLocked = v.size >= 7 && v[6].toInt() != 0,
                 )
             }
             Proto.RESULT -> if (v.size >= 11) {

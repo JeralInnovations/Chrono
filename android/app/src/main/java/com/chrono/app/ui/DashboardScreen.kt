@@ -274,9 +274,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                     running = running,
                     connected = (connState == ConnState.CONNECTED || connState == ConnState.RECONNECTING) &&
                         state != Proto.ST_CHECKING,
-                    sensorsReady = vm.sensor1Ready && vm.sensor2Ready &&
-                        deviceStatus?.batteryLocked != true,
-                    batteryLocked = deviceStatus?.batteryLocked == true,
+                    sensorsReady = vm.sensor1Ready && vm.sensor2Ready,
                     onArm = { vm.arm() },
                     onDisarm = { vm.disarm() },
                 )
@@ -602,7 +600,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
             title = { Text("Low logger battery") },
             text = {
                 Text(
-                    "The connected logger battery is low. Recharge or replace it before relying on another shot.",
+                    "The logger battery is low. It will keep trying to record shots, but very low voltage can cause a reset. Recharge it soon.",
                     style = MaterialTheme.typography.bodyLarge,
                 )
             },
@@ -975,10 +973,6 @@ private fun BatteryIndicator(deviceStatus: DeviceStatus?, compact: Boolean = fal
         if (mv != null) {
             if (isNotEmpty()) append(" ")
             append(String.format("%.2fV", mv / 1000.0))
-        }
-        if (deviceStatus?.batteryLocked == true) {
-            if (isNotEmpty()) append(" ")
-            append("ARM LOCK")
         }
     }
 
@@ -1407,7 +1401,6 @@ private fun ArmButton(
     running: Boolean,
     connected: Boolean,
     sensorsReady: Boolean,
-    batteryLocked: Boolean,
     onArm: () -> Unit,
     onDisarm: () -> Unit,
 ) {
@@ -1494,15 +1487,7 @@ private fun ArmButton(
                     Spacer(Modifier.size(10.dp))
                     Text("RECORD", style = MaterialTheme.typography.labelLarge)
                 }
-                if (connected && batteryLocked) {
-                    Text(
-                        "Battery is too low to arm. Charge it above the recovery threshold.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Bad,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    )
-                } else if (connected && !sensorsReady) {
+                if (connected && !sensorsReady) {
                     Text(
                         "Replace and retest both sensors before recording.",
                         style = MaterialTheme.typography.bodyMedium,

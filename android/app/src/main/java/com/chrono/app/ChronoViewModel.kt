@@ -24,6 +24,7 @@ import kotlinx.coroutines.launch
 import com.chrono.app.ble.HwInfo
 import com.chrono.app.ble.SimFault
 import com.chrono.app.ble.HealthStatus
+import com.chrono.app.ble.DeviceStatus
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
@@ -61,6 +62,10 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
 
     var screen by mutableStateOf(Screen.CONNECT)
         private set
+
+    private var startupRoutingPending = true
+    private var startupHasShotData = false
+    private var resetReadinessThisLaunch = true
 
     val results = mutableStateListOf<TestResult>()
 
@@ -223,13 +228,39 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     private fun setSensorReady(sensor: Int, ready: Boolean) {
         if (sensor == 1) sensor1Ready = ready else sensor2Ready = ready
         prefs.edit().putBoolean(readyKey(sensor), ready).apply()
+        if (sensor1Ready && sensor2Ready) resetReadinessThisLaunch = false
     }
 
     private fun readyKey(sensor: Int) = "ready_${ble.deviceStorageKey}_$sensor"
 
     private fun loadDeviceReadiness() {
+        if (resetReadinessThisLaunch) {
+            sensor1Ready = false
+            sensor2Ready = false
+            return
+        }
         sensor1Ready = prefs.getBoolean(readyKey(1), false)
         sensor2Ready = prefs.getBoolean(readyKey(2), false)
+    }
+
+    private fun routeFirstConnection(status: DeviceStatus?) {
+        if (!startupRoutingPending || ble.connState.value != ConnState.CONNECTED || status == null) return
+
+        val resumeExistingRun = status.state == Proto.ST_ARMED ||
+            status.state == Proto.ST_RUNNING || status.pendingCount > 0 || startupHasShotData
+        startupRoutingPending = false
+
+        if (resumeExistingRun) {
+            resetReadinessThisLaunch = false
+            loadDeviceReadiness()
+            screen = Screen.DASHBOARD
+        } else {
+            resetReadinessThisLaunch = true
+            sensor1Ready = false
+            sensor2Ready = false
+            ble.sendCommand(Proto.CMD_CANCEL)
+            screen = Screen.BASELINE
+        }
     }
 
     private val setupDone: Boolean
@@ -272,6 +303,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
                     Proto.ST_VERIFY1_OK -> if (!sensor1Ready) setSensorReady(1, true)
                     Proto.ST_VERIFY2_OK -> if (!sensor2Ready) setSensorReady(2, true)
                 }
+                routeFirstConnection(st)
             }
         }
         viewModelScope.launch {
@@ -282,9 +314,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
                         setUiMode(if (ble.isSimulation) "sim" else "real")
                         loadDeviceReadiness()
                         reloadForMode()   // swap to this mode's isolated records
-                        if (screen == Screen.CONNECT) {
-                            screen = if (setupDone) Screen.DASHBOARD else Screen.BASELINE
-                        }
+                        routeFirstConnection(ble.status.value)
                     }
                     ConnState.DISCONNECTED ->
                         // Leave the dashboard only when a real device session
@@ -306,6 +336,8 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         // A camera capture can kill the process mid-session; restore that prompt.
         photoPrompt = prefs.getString("photoPrompt", null)
         if (photoPrompt != null && setupDone) {
+            startupRoutingPending = false
+            resetReadinessThisLaunch = false
             screen = Screen.DASHBOARD
             when (prefs.getString("uiMode", "")) {
                 "sim" -> ble.connectSimulated()
@@ -330,6 +362,9 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun onRawResult(r: RawResult) {
+        startupHasShotData = true
+        routeFirstConnection(ble.status.value)
+
         // FETCH after a reconnect can re-deliver a result we already stored.
         val duplicate = results.any {
             it.deviceResultId == r.id && it.splitNs == r.splitNs &&

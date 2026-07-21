@@ -214,7 +214,7 @@ struct __attribute__((packed)) CalResult {
 // end) reports different numbers here and the app's confidence estimate
 // follows automatically — no app update needed.
 const uint8_t FW_MAJOR = 2;
-const uint8_t FW_MINOR = 1;
+const uint8_t FW_MINOR = 2;
 
 enum : uint16_t {
   PORT_STUCK_HIGH = 1 << 0,
@@ -251,7 +251,7 @@ struct __attribute__((packed)) StatusPacket {
   uint8_t  timeValid;
   uint8_t  batteryPercent;
   uint16_t batteryMv;
-  uint8_t  batteryArmLocked;
+  uint8_t  legacyBatteryLock; // retained for packet compatibility; always 0
 };
 
 struct __attribute__((packed)) HwInfo {
@@ -292,8 +292,6 @@ const uint32_t MAX_STABLE_STDDEV_NS = 5000UL;
 const uint32_t MIN_SPLIT_NS = 10000UL;
 const uint32_t MAX_SPLIT_NS = 1000000000UL;
 const uint32_t STOP_TIMEOUT_MS = 1000UL;
-const uint16_t BATTERY_ARM_LOCK_MV = 3400;
-const uint16_t BATTERY_ARM_RELEASE_MV = 3500;
 
 // ACK ids are queued here from the BLE callback and applied in loop(), so
 // the pending[] buffer is only ever mutated from one context.
@@ -301,7 +299,6 @@ volatile uint16_t ackQueue[MAX_PENDING];
 volatile uint8_t  ackHead = 0, ackTail = 0;
 uint32_t lastBatteryNotifyMs = 0;
 uint16_t filteredBatteryMv = 0;
-bool batteryArmLocked = false;
 
 // Wall-clock: the phone writes unix time; we extrapolate with millis().
 bool     timeValid  = false;
@@ -582,15 +579,6 @@ uint16_t sampleBatteryMv() {
   return filteredBatteryMv;
 }
 
-bool refreshBatteryArmLock(uint16_t mv) {
-  if (batteryArmLocked) {
-    if (mv >= BATTERY_ARM_RELEASE_MV) batteryArmLocked = false;
-  } else if (mv <= BATTERY_ARM_LOCK_MV) {
-    batteryArmLocked = true;
-  }
-  return batteryArmLocked;
-}
-
 uint16_t crc16Ccitt(const uint8_t* data, size_t len) {
   uint16_t crc = 0xFFFF;
   while (len--) {
@@ -655,14 +643,13 @@ bool performHealthCheck() {
 
 void notifyStatus() {
   uint16_t batteryMv = sampleBatteryMv();
-  refreshBatteryArmLock(batteryMv);
   StatusPacket pkt = {
     state,
     pendingCount,
     (uint8_t)(timeValid ? 1 : 0),
     batteryPercentFromMv(batteryMv),
     batteryMv,
-    (uint8_t)(batteryArmLocked ? 1 : 0)
+    0  // legacy battery-lock byte; voltage is warning-only in firmware 2.2+
   };
   chStatus.write((uint8_t*)&pkt, sizeof(pkt));
   chStatus.notify((uint8_t*)&pkt, sizeof(pkt));
@@ -719,14 +706,6 @@ void finishTimingFault(uint8_t faultFlag) {
 }
 
 void beginArm(bool overrideFaults) {
-  uint16_t batteryMv = sampleBatteryMv();
-  if (refreshBatteryArmLock(batteryMv)) {
-    armed = false;
-    started = false;
-    finished = false;
-    setState(ST_FAULT);
-    return;
-  }
   bool healthy = performHealthCheck();
   activeResultFlags = overrideFaults ? RESULT_ARM_OVERRIDE : 0;
   if (!healthy) activeResultFlags |= RESULT_PORT_WARNING;
@@ -759,6 +738,31 @@ void setState(uint8_t s) {
   notifyStatus();
 }
 
+void pollUserButton() {
+  static bool rawDown = false;
+  static bool stableDown = false;
+  static uint32_t rawChangedAtMs = 0;
+
+  bool down = digitalRead(WAKE_BUTTON_PIN) == LOW;
+  if (down != rawDown) {
+    rawDown = down;
+    rawChangedAtMs = millis();
+  }
+  if (down == stableDown || (uint32_t)(millis() - rawChangedAtMs) < 30UL) return;
+
+  stableDown = down;
+  if (!stableDown) return;
+
+  healthRequested = 0;
+  calRequested = 0;
+  armed = false;
+  started = false;
+  finished = false;
+  disarmTiming();
+  setState(ST_IDLE);
+  identifyUntilMs = millis() + 600UL;  // visible acknowledgment of the reset
+}
+
 // --------------------------------------------------------- BLE callbacks
 void onControlWrite(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
   (void)conn_hdl; (void)chr;
@@ -776,6 +780,8 @@ void onControlWrite(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, ui
       break;
     case CMD_DISARM:
     case CMD_CANCEL:
+      healthRequested = 0;
+      calRequested = 0;
       armed    = false;
       started  = false;
       finished = false;
@@ -916,6 +922,8 @@ void setup() {
 
 // ------------------------------------------------------------------- loop
 void loop() {
+  pollUserButton();
+
   switch (state) {
     case ST_VERIFY1:
       if (digitalRead(SENSOR1_PIN) == HIGH) setState(ST_VERIFY1_OK);
