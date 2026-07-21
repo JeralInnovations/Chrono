@@ -119,7 +119,7 @@ data class PortHealth(val flags: Int, val signatureNs: Long) {
         flags and Proto.PORT_CROSS_COUPLED != 0 -> "Cross-channel connection suspected"
         flags and Proto.PORT_LEAK_OR_SHORT != 0 -> "Conductive leakage or short suspected"
         flags and Proto.PORT_MISSING_SENSOR != 0 -> "Sensor not detected"
-        flags and Proto.PORT_UNSTABLE != 0 -> "Unstable sensor signature"
+        flags and Proto.PORT_UNSTABLE != 0 -> "Ready; variable signature"
         else -> "Ready"
     }
 }

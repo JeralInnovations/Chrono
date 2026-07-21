@@ -46,6 +46,8 @@ data class TestResult(
     var firmwareVersion: String = "",
     var formatVersion: Int = 1,
     var crcValid: Boolean = true,
+    /** User-entered +/- bound on START-to-STOP spacing, stored with this shot. */
+    var distanceUncertaintyM: Double = 0.0005,
     /** folder id under ChronoData holding this shot's log and photos */
     var shotFolder: String = "",
     /** user-chosen cover image URI for this shot ("" = use the first photo) */
@@ -167,6 +169,8 @@ class ResultStore(context: Context, simulation: Boolean = false) {
                     firmwareVersion = o.optString("firmwareVersion", ""),
                     formatVersion = o.optInt("formatVersion", 1),
                     crcValid = o.optBoolean("crcValid", true),
+                    distanceUncertaintyM = o.optDouble("distanceUncertaintyM", 0.0005)
+                        .takeIf { it.isFinite() && it >= 0.0 } ?: 0.0005,
                     shotFolder = o.optString("shotFolder", ""),
                     thumbnailUri = o.optString("thumbnailUri", ""),
                 )
@@ -205,6 +209,7 @@ class ResultStore(context: Context, simulation: Boolean = false) {
                     .put("firmwareVersion", r.firmwareVersion)
                     .put("formatVersion", r.formatVersion)
                     .put("crcValid", r.crcValid)
+                    .put("distanceUncertaintyM", r.distanceUncertaintyM)
                     .put("shotFolder", r.shotFolder)
                     .put("thumbnailUri", r.thumbnailUri)
                     .apply {

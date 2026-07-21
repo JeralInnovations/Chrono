@@ -214,7 +214,7 @@ struct __attribute__((packed)) CalResult {
 // end) reports different numbers here and the app's confidence estimate
 // follows automatically — no app update needed.
 const uint8_t FW_MAJOR = 2;
-const uint8_t FW_MINOR = 2;
+const uint8_t FW_MINOR = 3;
 
 enum : uint16_t {
   PORT_STUCK_HIGH = 1 << 0,
@@ -288,7 +288,9 @@ uint32_t resetCause = 0;
 
 const uint32_t MIN_SENSOR_SIGNATURE_NS = 20000UL;
 const uint32_t MAX_SENSOR_SIGNATURE_NS = 5000000UL;
-const uint32_t MAX_STABLE_STDDEV_NS = 5000UL;
+const uint32_t MAX_STABLE_STDDEV_NS = 10000UL;
+const uint8_t MIN_USABLE_HEALTH_SAMPLES = 48;
+const uint8_t MIN_STABLE_HEALTH_SAMPLES = 60;
 const uint32_t MIN_SPLIT_NS = 10000UL;
 const uint32_t MAX_SPLIT_NS = 1000000000UL;
 const uint32_t STOP_TIMEOUT_MS = 1000UL;
@@ -607,10 +609,16 @@ uint32_t makeBootId() {
 uint16_t classifyPort(const CalResult& r, bool crossCoupled, bool initiallyHigh) {
   uint16_t flags = 0;
   if (initiallyHigh) flags |= PORT_STUCK_HIGH;
-  if (r.status != 0 || r.samples < CAL_SAMPLES || r.medianNs > MAX_SENSOR_SIGNATURE_NS)
+  if (r.status == 2 || r.samples < MIN_USABLE_HEALTH_SAMPLES ||
+      r.medianNs > MAX_SENSOR_SIGNATURE_NS)
     flags |= PORT_LEAK_OR_SHORT;
-  if (r.samples && (r.stddevNs > MAX_STABLE_STDDEV_NS ||
-      (r.medianNs && r.stddevNs > r.medianNs / 20UL))) flags |= PORT_UNSTABLE;
+  // Cheap piezo/cable assemblies are usable with modest RC variation. Warn
+  // only when variation exceeds both a 10 us floor and 10% of the median, or
+  // when several of the 64 sweeps time out. One marginal sweep must not make
+  // a channel alternate between Ready and Unstable on successive checks.
+  if (r.samples && (r.samples < MIN_STABLE_HEALTH_SAMPLES ||
+      (r.stddevNs > MAX_STABLE_STDDEV_NS &&
+       r.medianNs && r.stddevNs > r.medianNs / 10UL))) flags |= PORT_UNSTABLE;
   if (crossCoupled) flags |= PORT_CROSS_COUPLED;
   if (r.samples && r.medianNs < MIN_SENSOR_SIGNATURE_NS) flags |= PORT_MISSING_SENSOR;
   return flags;

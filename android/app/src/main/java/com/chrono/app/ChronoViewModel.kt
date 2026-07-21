@@ -210,9 +210,18 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
             .getOrDefault(DistanceUnit.INCHES)
     )
         private set
+    var distanceUncertaintyValue by mutableStateOf(
+        prefs.getFloat(
+            "distanceUncertaintyValue",
+            (0.0005 / distanceUnit.toMeters).toFloat(),
+        ).toDouble()
+    )
+        private set
 
     /** Meters, derived only for the velocity math. */
     val distanceM: Double get() = distanceValue * distanceUnit.toMeters
+    val distanceUncertaintyM: Double
+        get() = distanceUncertaintyValue * distanceUnit.toMeters
 
     /** Non-null while the user is re-testing a sensor from the dashboard. */
     var retestSensor by mutableStateOf<Int?>(null)
@@ -271,6 +280,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     // Tracks which mode's records are currently loaded (null until first load).
     private var loadedMode: Boolean? = null
     private var loadedNamespace: String? = null
+    private var portCheckRequested = false
     var calRunning by mutableStateOf(false)
         private set
     private val calQueue = ArrayDeque<Pair<Int, CalPhase>>()
@@ -283,7 +293,16 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { ble.cal.collect { onCalReading(it) } }
         viewModelScope.launch { ble.results.collect { onRawResult(it) } }
         viewModelScope.launch {
-            ble.health.collect { health -> health?.let { appendHealthHistory(it) } }
+            ble.health.collect { health ->
+                health?.let {
+                    appendHealthHistory(it)
+                    if (portCheckRequested && it.checkedAtBootMs > 0) {
+                        portCheckRequested = false
+                        setSensorReady(1, !it.channel1.serious)
+                        setSensorReady(2, !it.channel2.serious)
+                    }
+                }
+            }
         }
         viewModelScope.launch {
             ble.hwInfo.collect { info ->
@@ -376,6 +395,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
                 deviceResultId = r.id,
                 splitNs = r.splitNs,
                 distanceM = distanceM,
+                distanceUncertaintyM = distanceUncertaintyM,
                 label = pendingLabel.trim(),
                 epochMillis = if (r.epochSec > 0) r.epochSec * 1000L else null,
                 shotType = pendingShotType.ifBlank { "Standard" },
@@ -562,6 +582,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         .put("outcome", r.specialNotes.ifBlank { r.outcome })
         .put("splitNs", r.splitNs)
         .put("distanceM", r.distanceM)
+        .put("distanceUncertaintyM", r.distanceUncertaintyM)
         .put("velocityMps", r.metersPerSecond)
         .put("velocityFps", r.feetPerSecond)
         .put("accuracyEnvelopePercent", accuracyEnvelopePercentFor(r))
@@ -803,7 +824,11 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun accuracyEnvelopePercentFor(r: TestResult): Double {
         if (r.isManual || r.splitNs <= 0 || r.distanceM <= 0) return 0.0
-        return accuracyEnvelopePercentRaw(r.splitNs.toDouble(), r.distanceM)
+        return accuracyEnvelopePercentRaw(
+            r.splitNs.toDouble(),
+            r.distanceM,
+            r.distanceUncertaintyM,
+        )
     }
 
     fun ciPercentFor(r: TestResult): Double = accuracyEnvelopePercentFor(r)
@@ -812,13 +837,17 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     fun estimatedAccuracyEnvelopeAtCurrentSpacing(fps: Double = 3000.0): Double? {
         if (distanceM <= 0) return null
         val splitNs = distanceM / (fps / 3.28084) * 1e9
-        return accuracyEnvelopePercentRaw(splitNs, distanceM)
+        return accuracyEnvelopePercentRaw(splitNs, distanceM, distanceUncertaintyM)
     }
 
     fun estimatedCiAtCurrentSpacing(fps: Double = 3000.0): Double? =
         estimatedAccuracyEnvelopeAtCurrentSpacing(fps)
 
-    private fun accuracyEnvelopePercentRaw(splitNs: Double, gateM: Double): Double {
+    private fun accuracyEnvelopePercentRaw(
+        splitNs: Double,
+        gateM: Double,
+        spacingRangeM: Double,
+    ): Double {
         val hw = ble.hwInfo.value ?: HwInfo.DEFAULT
         val tickNs = hw.tickPs / 1000.0 / sqrt(12.0)
         val jitterNs = hw.edgeJitterNs * sqrt(2.0)             // two independent edges
@@ -827,9 +856,12 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         val sigmaT = sqrt(
             tickNs.pow(2.0) + jitterNs.pow(2.0) + clockNs.pow(2.0) + frontEndNs.pow(2.0)
         )
-        val sigmaD = 0.0005                                    // 0.5 mm spacing uncertainty
-        val rel = sqrt((sigmaT / splitNs).pow(2.0) + (sigmaD / gateM).pow(2.0))
-        return 2.58 * rel * 100.0
+        // spacingRangeM is already a user-entered +/- bound, so do not expand
+        // it by 2.58 again. Combine it with the 99% timing envelope as an
+        // independent relative velocity contribution.
+        val timingEnvelopeRel = 2.58 * sigmaT / splitNs
+        val spacingEnvelopeRel = spacingRangeM.coerceAtLeast(0.0) / gateM
+        return sqrt(timingEnvelopeRel.pow(2.0) + spacingEnvelopeRel.pow(2.0)) * 100.0
     }
 
     private fun calibrationFrontEndNs(): Double {
@@ -874,12 +906,14 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         screen = Screen.DISTANCE
     }
 
-    fun saveDistance(value: Double, unit: DistanceUnit) {
+    fun saveDistance(value: Double, uncertainty: Double, unit: DistanceUnit) {
         distanceValue = value
+        distanceUncertaintyValue = uncertainty
         distanceUnit = unit
         ble.simDistanceM = distanceM
         prefs.edit()
             .putFloat("distanceValue", value.toFloat())
+            .putFloat("distanceUncertaintyValue", uncertainty.toFloat())
             .putString("unit", unit.name)
             .apply()
         screen = Screen.DASHBOARD
@@ -918,7 +952,10 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     fun armWithOverride() = ble.sendCommand(Proto.CMD_ARM_OVERRIDE)
     fun disarm() = ble.sendCommand(Proto.CMD_DISARM)
     fun syncTime() = ble.syncTime()
-    fun checkPorts() = ble.sendCommand(Proto.CMD_HEALTH)
+    fun checkPorts() {
+        portCheckRequested = true
+        ble.sendCommand(Proto.CMD_HEALTH)
+    }
     fun identifyLogger() = ble.sendCommand(Proto.CMD_IDENTIFY)
     fun setSimFault(fault: SimFault) = ble.setSimFault(fault)
 

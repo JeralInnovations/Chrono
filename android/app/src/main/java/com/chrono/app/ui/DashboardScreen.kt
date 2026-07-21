@@ -1047,12 +1047,15 @@ private fun PortHealthCard(
 ) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(Modifier.fillMaxWidth().padding(18.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("PORT HEALTH", style = MaterialTheme.typography.labelSmall,
-                    color = TextDim, modifier = Modifier.weight(1f))
-                TextButton(onClick = onIdentify, enabled = enabled) { Text("Identify") }
+            Text("PORT HEALTH", style = MaterialTheme.typography.labelSmall, color = TextDim)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onIdentify, enabled = enabled) { Text("Flash LED") }
                 TextButton(onClick = onCheck, enabled = enabled && !checking) {
-                    Text(if (checking) "Checking..." else "Check")
+                    Text(if (checking) "Checking..." else "Check ports")
                 }
             }
             if (health == null || health.checkedAtBootMs == 0L) {
@@ -1063,7 +1066,7 @@ private fun PortHealthCard(
                     Row(Modifier.fillMaxWidth().padding(top = 6.dp)) {
                         Text("CH$channel", modifier = Modifier.weight(0.25f), color = TextDim)
                         Text(
-                            port.summary(),
+                            "${port.summary()} - ${healthSignatureText(port.signatureNs)}",
                             modifier = Modifier.weight(0.75f),
                             color = when {
                                 port.serious -> Bad
@@ -1088,6 +1091,12 @@ private fun PortHealthCard(
             }
         }
     }
+}
+
+private fun healthSignatureText(ns: Long): String = when {
+    ns >= 1_000_000L -> "${trimZeros(ns / 1_000_000.0)} ms"
+    ns >= 1_000L -> "${trimZeros(ns / 1_000.0)} us"
+    else -> "$ns ns"
 }
 
 /**
@@ -1118,7 +1127,8 @@ private fun RigCard(vm: ChronoViewModel, enabled: Boolean) {
                     SpanArrow()
                     TextButton(onClick = { vm.changeDistance() }, enabled = enabled) {
                         Text(
-                            "${trimZeros(vm.distanceInUnit())} ${vm.distanceUnit.label}",
+                            "${trimZeros(vm.distanceInUnit())} +/- " +
+                                "${trimZeros(vm.distanceUncertaintyValue)} ${vm.distanceUnit.label}",
                             color = Teal,
                             style = MaterialTheme.typography.titleMedium,
                         )
@@ -1137,8 +1147,8 @@ private fun RigCard(vm: ChronoViewModel, enabled: Boolean) {
                             )
                             Spacer(Modifier.size(6.dp))
                             InfoDot(
-                                "GAE",
-                                "GAE means Guaranteed Accuracy Envelope. It is the app's conservative +/- percent range around the measured velocity. For example, 1000 ft/s with +/- 2% GAE means the measurement should be treated as about 980 to 1020 ft/s. The app builds that percent from timer resolution, clock drift, edge jitter, sensor spacing uncertainty, and calibration data. Faster shots and shorter sensor spacing widen the envelope because the same timing error is a larger share of the measurement. Closely matched channel calibration narrows it.",
+                                "Guaranteed Accuracy Envelope (GAE)",
+                                "The Guaranteed Accuracy Envelope (GAE) is the app's conservative +/- percent range around the measured velocity. For example, 1000 ft/s with +/- 2% GAE means the measurement should be treated as about 980 to 1020 ft/s. The app combines timer resolution, clock drift, edge jitter, your entered spacing measurement range, and calibration data. Faster shots and shorter sensor spacing widen the envelope because the same timing error is a larger share of the measurement. Closely matched channel calibration narrows it.",
                             )
                         }
                     }
@@ -1881,10 +1891,14 @@ private fun EditResultDialog(
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 if (showRecordedValues) {
                     val spacingIn = result.distanceM * 39.3701
+                    val spacingRangeIn = result.distanceUncertaintyM * 39.3701
                     val velocityText = if (result.metersPerSecond > 0)
                         "%.1f ft/s".format(result.feetPerSecond) else "Not recorded"
                     ReadOnlyLogValue("Velocity", velocityText)
-                    ReadOnlyLogValue("SENSOR SPACING", "%.3f in".format(spacingIn))
+                    ReadOnlyLogValue(
+                        "SENSOR SPACING",
+                        "%.3f +/- %.3f in".format(spacingIn, spacingRangeIn),
+                    )
                     ReadOnlyLogValue("Split time", result.splitTimeText())
                     if (result.deviceSerial.isNotBlank()) {
                         ReadOnlyLogValue("MCU serial", result.deviceSerial)

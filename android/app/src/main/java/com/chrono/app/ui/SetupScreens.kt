@@ -449,9 +449,13 @@ fun DistanceScreen(vm: ChronoViewModel) {
     var text by remember {
         mutableStateOf(if (vm.distanceValue > 0) trimZeros(vm.distanceInUnit()) else "")
     }
+    var uncertaintyText by remember {
+        mutableStateOf(trimZeros(vm.distanceUncertaintyValue))
+    }
     var unit by remember { mutableStateOf(vm.distanceUnit) }
     var menuOpen by remember { mutableStateOf(false) }
     val value = text.replace(',', '.').toDoubleOrNull()
+    val uncertainty = uncertaintyText.replace(',', '.').toDoubleOrNull()
 
     Column(
         modifier = Modifier.fillMaxSize().padding(28.dp),
@@ -492,15 +496,40 @@ fun DistanceScreen(vm: ChronoViewModel) {
                     DistanceUnit.entries.forEach { u ->
                         DropdownMenuItem(
                             text = { Text(u.label) },
-                            onClick = { unit = u; menuOpen = false },
+                            onClick = {
+                                val oldUnit = unit
+                                value?.let { text = trimZeros(it * oldUnit.toMeters / u.toMeters) }
+                                uncertainty?.let {
+                                    uncertaintyText = trimZeros(it * oldUnit.toMeters / u.toMeters)
+                                }
+                                unit = u
+                                menuOpen = false
+                            },
                         )
                     }
                 }
             }
         }
         Spacer(Modifier.height(18.dp))
+        OutlinedTextField(
+            value = uncertaintyText,
+            onValueChange = { uncertaintyText = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = {
+                SetupFieldLabel(
+                    "MEASUREMENT RANGE (+/- ${unit.label})",
+                    "Your estimated +/- error when measuring the START-to-STOP spacing. " +
+                        "For example, enter 0.25 for a spacing measured to +/- 0.25 in. " +
+                        "This range is combined with timing uncertainty in the Guaranteed " +
+                        "Accuracy Envelope (GAE).",
+                )
+            },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+        )
+        Spacer(Modifier.height(18.dp))
         Text(
-            "This distance is used for velocity and GAE. A small spacing error changes every shot measurement.",
+            "Spacing sets velocity directly. Its +/- measurement range is included in every GAE result.",
             style = MaterialTheme.typography.bodyLarge,
             color = TextDim,
             textAlign = TextAlign.Center,
@@ -508,8 +537,9 @@ fun DistanceScreen(vm: ChronoViewModel) {
 
         Spacer(Modifier.weight(1f))
         Button(
-            onClick = { vm.saveDistance(value ?: 0.0, unit) },
-            enabled = value != null && value > 0,
+            onClick = { vm.saveDistance(value ?: 0.0, uncertainty ?: 0.0, unit) },
+            enabled = value != null && value > 0 && uncertainty != null &&
+                uncertainty >= 0 && uncertainty < value,
             modifier = Modifier.fillMaxWidth().height(54.dp),
         ) { Text("Save distance") }
     }

@@ -66,6 +66,12 @@ These are electrical observations. In particular, firmware reports
 `conductive leakage or short suspected`; it cannot prove that moisture caused
 the leakage.
 
+Firmware 2.3 treats at least 48 of 64 valid sweeps as electrically usable. It
+reports a non-blocking variable-signature warning when fewer than 60 sweeps
+complete or when standard deviation exceeds both 10 us and 10% of the median.
+This avoids Ready/Unstable flicker from one marginal sweep while preserving a
+warning for genuinely noisy or intermittent wiring.
+
 The XIAO's onboard 1S-LiPo path supplies both charging and pack-voltage
 measurement. Firmware holds `PIN_VBAT_ENABLE` (D14 / P0.14) low, then reads
 `PIN_VBAT` (D32 / P0.31) through the board's approximately 2.961:1 divider.
@@ -98,7 +104,7 @@ supply remains high enough to operate.
 Implemented for this board:
 
 - serial-derived `Chrono-XXXX` BLE names;
-- app nickname, address, RSSI, last-connected marker, and Identify command;
+- app nickname, address, RSSI, last-connected marker, and Flash LED command;
 - firmware-owned pre-arm port health and arm refusal;
 - START-first hardware gating, timeout, range checks, and timing fault logs;
 - per-logger calibration/readiness records with a 30-day age limit;
