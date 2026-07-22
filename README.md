@@ -276,6 +276,10 @@ every result (label, date, split, distance, velocities) plus the raw
 calibration history (`.jsonl`) through Android's share sheet — email it,
 save to Drive, etc.
 
+Saving changes in a result's **Edit** dialog updates both the app's private
+result index and that test folder's canonical `shot.json`; it does not create a
+second JSON file.
+
 **Hardware identification & accuracy.** The device reports its hardware
 revision and timing spec (timer tick, crystal tolerance, front-end jitter)
 over BLE. Each result shows a roughly 99%-style Guaranteed Accuracy Envelope

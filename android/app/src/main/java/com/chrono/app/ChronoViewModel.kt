@@ -486,7 +486,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         val idx = results.indexOfFirst { it.uid == uid }
         if (idx < 0) return
         val r = results[idx]
-        results[idx] = r.copy(
+        val updated = r.copy(
             label = label,
             shotType = shotType.ifBlank { "Standard" },
             tool = tool,
@@ -500,7 +500,10 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
             outcome = specialNotes,
             epochMillis = epochMillis ?: r.epochMillis,
         )
+        val rel = session.folderForResult(updated.shotFolder, updated.uid)
+        results[idx] = if (updated.shotFolder == rel) updated else updated.copy(shotFolder = rel)
         persist()
+        session.updateShot(rel, shotJson(results[idx]))
     }
 
     /** Log a shot with no chronograph connected — velocity typed in (or blank). */

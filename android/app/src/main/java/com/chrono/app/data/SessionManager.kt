@@ -124,16 +124,16 @@ class SessionManager(private val context: Context, simulation: Boolean = false) 
     /** Writes the log into its test folder; returns the folder id for the record. */
     fun logShot(label: String, json: JSONObject): String {
         val rel = currentTest(label)
-        createUriAt(rel, "shot.json", "application/json")?.let { uri ->
-            runCatching {
-                context.contentResolver.openOutputStream(uri)?.use {
-                    it.write(json.toString(2).toByteArray())
-                }
-            }
-        }
+        writeShotJson(rel, json)
         shotLogged = true
         save()
         return rel
+    }
+
+    /** Rewrites an existing test's canonical log after the user edits it. */
+    fun updateShot(rel: String, json: JSONObject): Boolean {
+        if (rel.isBlank()) return false
+        return writeShotJson(rel, json)
     }
 
     /** Folder to attach photos to an existing record without touching counters. */
@@ -189,6 +189,44 @@ class SessionManager(private val context: Context, simulation: Boolean = false) 
     }
 
     // ------------------------------------------------------------------ helpers
+
+    private fun writeShotJson(rel: String, json: JSONObject): Boolean {
+        val bytes = json.toString(2).toByteArray()
+        if (!useMediaStore) {
+            val dir = File(context.getExternalFilesDir(null) ?: context.filesDir, "$rootDir/$rel")
+            return runCatching {
+                dir.mkdirs()
+                File(dir, "shot.json").writeBytes(bytes)
+            }.isSuccess
+        }
+
+        val uri = findUriAt(rel, "shot.json")
+            ?: createUriAt(rel, "shot.json", "application/json")
+            ?: return false
+        return runCatching {
+            context.contentResolver.openOutputStream(uri, "wt")!!.use { it.write(bytes) }
+        }.isSuccess
+    }
+
+    private fun findUriAt(rel: String, displayName: String): Uri? {
+        val coll = MediaStore.Files.getContentUri("external")
+        return runCatching {
+            context.contentResolver.query(
+                coll,
+                arrayOf(MediaStore.MediaColumns._ID),
+                "${MediaStore.MediaColumns.RELATIVE_PATH}=? AND " +
+                    "${MediaStore.MediaColumns.DISPLAY_NAME}=?",
+                arrayOf("Documents/$rootDir/$rel/", displayName),
+                "${MediaStore.MediaColumns._ID} DESC",
+            )?.use { cursor ->
+                if (!cursor.moveToFirst()) null
+                else ContentUris.withAppendedId(
+                    coll,
+                    cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)),
+                )
+            }
+        }.getOrNull()
+    }
 
     private fun createUriAt(rel: String, displayName: String, mime: String): Uri? =
         if (useMediaStore) {
