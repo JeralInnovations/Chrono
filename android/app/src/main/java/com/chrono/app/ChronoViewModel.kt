@@ -210,18 +210,29 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
             .getOrDefault(DistanceUnit.INCHES)
     )
         private set
-    var distanceUncertaintyValue by mutableStateOf(
+    var measurementErrorUnit by mutableStateOf(
+        runCatching {
+            DistanceUnit.valueOf(
+                prefs.getString("measurementErrorUnit", distanceUnit.name)!!,
+            )
+        }.getOrDefault(distanceUnit)
+    )
+        private set
+    var measurementErrorValue by mutableStateOf(
         prefs.getFloat(
-            "distanceUncertaintyValue",
-            (0.0005 / distanceUnit.toMeters).toFloat(),
+            "measurementErrorValue",
+            prefs.getFloat(
+                "distanceUncertaintyValue",
+                (0.0005 / measurementErrorUnit.toMeters).toFloat(),
+            ),
         ).toDouble()
     )
         private set
 
     /** Meters, derived only for the velocity math. */
     val distanceM: Double get() = distanceValue * distanceUnit.toMeters
-    val distanceUncertaintyM: Double
-        get() = distanceUncertaintyValue * distanceUnit.toMeters
+    val measurementErrorM: Double
+        get() = measurementErrorValue * measurementErrorUnit.toMeters
 
     /** Non-null while the user is re-testing a sensor from the dashboard. */
     var retestSensor by mutableStateOf<Int?>(null)
@@ -233,16 +244,26 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var sensor2Ready by mutableStateOf(false)
         private set
+    private var setupResultRecorded = false
 
     private fun setSensorReady(sensor: Int, ready: Boolean) {
+        val bothWereReady = sensor1Ready && sensor2Ready
         if (sensor == 1) sensor1Ready = ready else sensor2Ready = ready
         prefs.edit().putBoolean(readyKey(sensor), ready).apply()
-        if (sensor1Ready && sensor2Ready) resetReadinessThisLaunch = false
+        if (sensor1Ready && sensor2Ready) {
+            resetReadinessThisLaunch = false
+            if (!bothWereReady) {
+                setupResultRecorded = false
+                prefs.edit().putBoolean(setupResultKey(), false).apply()
+            }
+        }
     }
 
     private fun readyKey(sensor: Int) = "ready_${ble.deviceStorageKey}_$sensor"
+    private fun setupResultKey() = "setup_result_recorded_${ble.deviceStorageKey}"
 
     private fun loadDeviceReadiness() {
+        setupResultRecorded = prefs.getBoolean(setupResultKey(), false)
         if (resetReadinessThisLaunch) {
             sensor1Ready = false
             sensor2Ready = false
@@ -385,17 +406,20 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         routeFirstConnection(ble.status.value)
 
         // FETCH after a reconnect can re-deliver a result we already stored.
-        val duplicate = results.any {
-            it.deviceResultId == r.id && it.splitNs == r.splitNs &&
-                (r.bootId == 0L || it.bootId == 0L || it.bootId == r.bootId)
+        val duplicate = results.any { existing ->
+            existing.deviceResultId == r.id && when {
+                r.bootId != 0L && existing.bootId != 0L -> existing.bootId == r.bootId
+                else -> existing.splitNs == r.splitNs
+            }
         }
-        if (!duplicate) {
+        if (!duplicate && !setupResultRecorded) {
             val rec = TestResult(
                 uid = UUID.randomUUID().toString(),
                 deviceResultId = r.id,
                 splitNs = r.splitNs,
                 distanceM = distanceM,
-                distanceUncertaintyM = distanceUncertaintyM,
+                measurementErrorM = measurementErrorM,
+                measurementErrorUnit = measurementErrorUnit.name,
                 label = pendingLabel.trim(),
                 epochMillis = if (r.epochSec > 0) r.epochSec * 1000L else null,
                 shotType = pendingShotType.ifBlank { "Standard" },
@@ -422,6 +446,8 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
             rec.thumbnailUri = session.listPhotos(rec.shotFolder).firstOrNull()?.toString() ?: ""
             results.add(0, rec)
             persist()
+            setupResultRecorded = true
+            prefs.edit().putBoolean(setupResultKey(), true).apply()
             prefs.edit()
                 .putString("pendShotType", pendingShotType.ifBlank { "Standard" })
                 .putString("pendTool", pendingTool)
@@ -432,7 +458,8 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
                 .putString("pendTdUnit", pendingTargetDistUnit)
                 .apply()
             pendingLabel = session.suggestedLabel()   // Test2, Test3, …
-            newShots.add(rec)   // review dialog first; photos prompt on dismiss
+            newShots.clear()
+            newShots.add(rec)   // exactly one result belongs to this setup
             // A real shot destroys both break-screens: force re-verify (and the
             // sensor-attach flow re-measures the fresh screen's load).
             setSensorReady(1, false)
@@ -582,7 +609,8 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         .put("outcome", r.specialNotes.ifBlank { r.outcome })
         .put("splitNs", r.splitNs)
         .put("distanceM", r.distanceM)
-        .put("distanceUncertaintyM", r.distanceUncertaintyM)
+        .put("measurementErrorM", r.measurementErrorM)
+        .put("measurementErrorUnit", r.measurementErrorUnit)
         .put("velocityMps", r.metersPerSecond)
         .put("velocityFps", r.feetPerSecond)
         .put("accuracyEnvelopePercent", accuracyEnvelopePercentFor(r))
@@ -827,7 +855,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         return accuracyEnvelopePercentRaw(
             r.splitNs.toDouble(),
             r.distanceM,
-            r.distanceUncertaintyM,
+            r.measurementErrorM,
         )
     }
 
@@ -837,7 +865,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     fun estimatedAccuracyEnvelopeAtCurrentSpacing(fps: Double = 3000.0): Double? {
         if (distanceM <= 0) return null
         val splitNs = distanceM / (fps / 3.28084) * 1e9
-        return accuracyEnvelopePercentRaw(splitNs, distanceM, distanceUncertaintyM)
+        return accuracyEnvelopePercentRaw(splitNs, distanceM, measurementErrorM)
     }
 
     fun estimatedCiAtCurrentSpacing(fps: Double = 3000.0): Double? =
@@ -846,7 +874,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     private fun accuracyEnvelopePercentRaw(
         splitNs: Double,
         gateM: Double,
-        spacingRangeM: Double,
+        measurementErrorM: Double,
     ): Double {
         val hw = ble.hwInfo.value ?: HwInfo.DEFAULT
         val tickNs = hw.tickPs / 1000.0 / sqrt(12.0)
@@ -856,11 +884,11 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         val sigmaT = sqrt(
             tickNs.pow(2.0) + jitterNs.pow(2.0) + clockNs.pow(2.0) + frontEndNs.pow(2.0)
         )
-        // spacingRangeM is already a user-entered +/- bound, so do not expand
+        // measurementErrorM is already a user-entered +/- bound, so do not expand
         // it by 2.58 again. Combine it with the 99% timing envelope as an
         // independent relative velocity contribution.
         val timingEnvelopeRel = 2.58 * sigmaT / splitNs
-        val spacingEnvelopeRel = spacingRangeM.coerceAtLeast(0.0) / gateM
+        val spacingEnvelopeRel = measurementErrorM.coerceAtLeast(0.0) / gateM
         return sqrt(timingEnvelopeRel.pow(2.0) + spacingEnvelopeRel.pow(2.0)) * 100.0
     }
 
@@ -906,15 +934,22 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         screen = Screen.DISTANCE
     }
 
-    fun saveDistance(value: Double, uncertainty: Double, unit: DistanceUnit) {
+    fun saveDistance(
+        value: Double,
+        unit: DistanceUnit,
+        measurementError: Double,
+        errorUnit: DistanceUnit,
+    ) {
         distanceValue = value
-        distanceUncertaintyValue = uncertainty
         distanceUnit = unit
+        measurementErrorValue = measurementError
+        measurementErrorUnit = errorUnit
         ble.simDistanceM = distanceM
         prefs.edit()
             .putFloat("distanceValue", value.toFloat())
-            .putFloat("distanceUncertaintyValue", uncertainty.toFloat())
             .putString("unit", unit.name)
+            .putFloat("measurementErrorValue", measurementError.toFloat())
+            .putString("measurementErrorUnit", errorUnit.name)
             .apply()
         screen = Screen.DASHBOARD
         if (inWizard) {

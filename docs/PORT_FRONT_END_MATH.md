@@ -264,7 +264,7 @@ sigma_time_ns = sqrt(
 )
 
 timing_envelope_relative = 2.58 * sigma_time_ns / split_ns
-spacing_envelope_relative = user_spacing_range_m / spacing_m
+spacing_envelope_relative = user_measurement_error_m / spacing_m
 
 GAE_relative = sqrt(
     timing_envelope_relative^2
@@ -274,10 +274,11 @@ GAE_relative = sqrt(
 GAE_percent = GAE_relative * 100
 ```
 
-The user enters the spacing term as an already-expanded `+/-` measurement
-range. It is therefore not multiplied by 2.58 a second time. Because velocity
+The user enters Measurement Error as an already-expanded `+/-` value, using an
+independent unit selector. It is therefore not multiplied by 2.58 a second
+time. Because velocity
 is proportional to spacing for a fixed split time, its relative contribution
-is exactly `user_spacing_range / spacing`. The app combines that independent
+is exactly `user_measurement_error / spacing`. The app combines that independent
 contribution with the 99% timing envelope by root-sum-square.
 
 Firmware revision 1 currently reports:
@@ -304,7 +305,7 @@ sigma_time = 533 ns
 ```
 
 At 6 inch spacing, with default calibration assumptions and a user-entered
-`+/-0.02 in` spacing range, the app's approximate GAE is:
+Measurement Error of `+/-0.02 in`, the app's approximate GAE is:
 
 | Velocity | Split time | Approximate GAE | Velocity envelope |
 |---:|---:|---:|---:|
@@ -314,7 +315,7 @@ At 6 inch spacing, with default calibration assumptions and a user-entered
 | 4000 fps | 125 us | +/-1.15% | +/-46 fps |
 | 5000 fps | 100 us | +/-1.42% | +/-71 fps |
 
-With a `+/-0.25 in` spacing range over the same 6 inch gate, spacing alone is
+With Measurement Error of `+/-0.25 in` over the same 6 inch gate, spacing alone is
 `+/-4.17%`, so it dominates the combined GAE at ordinary shot velocities.
 
 The GAE can narrow when channel signatures are closely matched and loaded
@@ -331,7 +332,7 @@ noisy.
    injection can affect threshold stability.
 4. For 1000 to 5000 fps over 6 inches, clean-hit timing variability is expected
    to be about +/-0.2% to +/-1.0% before spacing error.
-5. With a user-entered `+/-0.02 in` spacing range, the app's GAE is roughly
+5. With user-entered Measurement Error of `+/-0.02 in`, the app's GAE is roughly
    +/-0.4% to +/-1.4% over the same 1000 to 5000 fps range with default
    calibration assumptions. A wider entered range increases it directly.
 6. A high-speed buffer or comparator with a defined threshold would reduce the

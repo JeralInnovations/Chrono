@@ -28,8 +28,8 @@ object Exporter {
                     "disruptor_loading,projectile_type,pass_fail,special_notes,source,date_iso," +
                     "mcu_serial,hardware_revision,firmware_version,battery_mv,boot_id,reset_cause," +
                     "result_flags,port_flags,raw_start_ticks,raw_stop_ticks,format_version,crc_valid," +
-                    "timing_fault,split_time,split_ns,split_ms,distance_m,distance_uncertainty_m," +
-                    "velocity_mps,velocity_fps"
+                    "timing_fault,split_time,split_ns,split_ms,distance_m,measurement_error_m," +
+                    "measurement_error_unit,velocity_mps,velocity_fps"
             )
             for (r in results) {
                 val date = r.epochMillis?.let { Instant.ofEpochMilli(it).toString() } ?: ""
@@ -49,7 +49,8 @@ object Exporter {
                         esc(r.splitTimeText()) + "," + r.splitNs + "," +
                         String.format(Locale.US, "%.6f", r.splitMillis) + "," +
                         String.format(Locale.US, "%.5f", r.distanceM) + "," +
-                        String.format(Locale.US, "%.5f", r.distanceUncertaintyM) + "," +
+                        String.format(Locale.US, "%.5f", r.measurementErrorM) + "," +
+                        r.measurementErrorUnit + "," +
                         String.format(Locale.US, "%.3f", r.metersPerSecond) + "," +
                         String.format(Locale.US, "%.2f", r.feetPerSecond)
                 )

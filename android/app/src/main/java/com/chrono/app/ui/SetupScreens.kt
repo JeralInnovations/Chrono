@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -449,16 +450,22 @@ fun DistanceScreen(vm: ChronoViewModel) {
     var text by remember {
         mutableStateOf(if (vm.distanceValue > 0) trimZeros(vm.distanceInUnit()) else "")
     }
-    var uncertaintyText by remember {
-        mutableStateOf(trimZeros(vm.distanceUncertaintyValue))
+    var measurementErrorText by remember {
+        mutableStateOf(trimZeros(vm.measurementErrorValue))
     }
     var unit by remember { mutableStateOf(vm.distanceUnit) }
+    var errorUnit by remember { mutableStateOf(vm.measurementErrorUnit) }
     var menuOpen by remember { mutableStateOf(false) }
+    var errorMenuOpen by remember { mutableStateOf(false) }
     val value = text.replace(',', '.').toDoubleOrNull()
-    val uncertainty = uncertaintyText.replace(',', '.').toDoubleOrNull()
+    val measurementError = measurementErrorText.replace(',', '.').toDoubleOrNull()
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(28.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .imePadding()
+            .verticalScroll(rememberScrollState())
+            .padding(28.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(20.dp))
@@ -499,9 +506,6 @@ fun DistanceScreen(vm: ChronoViewModel) {
                             onClick = {
                                 val oldUnit = unit
                                 value?.let { text = trimZeros(it * oldUnit.toMeters / u.toMeters) }
-                                uncertainty?.let {
-                                    uncertaintyText = trimZeros(it * oldUnit.toMeters / u.toMeters)
-                                }
                                 unit = u
                                 menuOpen = false
                             },
@@ -511,35 +515,75 @@ fun DistanceScreen(vm: ChronoViewModel) {
             }
         }
         Spacer(Modifier.height(18.dp))
-        OutlinedTextField(
-            value = uncertaintyText,
-            onValueChange = { uncertaintyText = it },
-            modifier = Modifier.fillMaxWidth(),
-            label = {
-                SetupFieldLabel(
-                    "MEASUREMENT RANGE (+/- ${unit.label})",
-                    "Your estimated +/- error when measuring the START-to-STOP spacing. " +
-                        "For example, enter 0.25 for a spacing measured to +/- 0.25 in. " +
-                        "This range is combined with timing uncertainty in the Guaranteed " +
-                        "Accuracy Envelope (GAE).",
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = measurementErrorText,
+                onValueChange = { measurementErrorText = it },
+                modifier = Modifier.weight(1f),
+                label = {
+                    SetupFieldLabel(
+                        "MEASUREMENT ERROR",
+                        "Your estimated +/- error when measuring the START-to-STOP spacing. " +
+                            "For example, enter 0.25 and select in for a spacing measured " +
+                            "to +/- 0.25 in. This is combined with timing uncertainty in " +
+                            "the Guaranteed Accuracy Envelope (GAE).",
+                    )
+                },
+                prefix = { Text("+/-") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            )
+            Spacer(Modifier.size(12.dp))
+            ExposedDropdownMenuBox(
+                expanded = errorMenuOpen,
+                onExpandedChange = { errorMenuOpen = it },
+            ) {
+                TextField(
+                    value = errorUnit.label,
+                    onValueChange = {},
+                    readOnly = true,
+                    modifier = Modifier.menuAnchor().size(width = 96.dp, height = 56.dp),
+                    trailingIcon = {
+                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = errorMenuOpen)
+                    },
                 )
-            },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-        )
+                ExposedDropdownMenu(
+                    expanded = errorMenuOpen,
+                    onDismissRequest = { errorMenuOpen = false },
+                ) {
+                    DistanceUnit.entries.forEach { u ->
+                        DropdownMenuItem(
+                            text = { Text(u.label) },
+                            onClick = {
+                                val oldUnit = errorUnit
+                                measurementError?.let {
+                                    measurementErrorText =
+                                        trimZeros(it * oldUnit.toMeters / u.toMeters)
+                                }
+                                errorUnit = u
+                                errorMenuOpen = false
+                            },
+                        )
+                    }
+                }
+            }
+        }
         Spacer(Modifier.height(18.dp))
         Text(
-            "Spacing sets velocity directly. Its +/- measurement range is included in every GAE result.",
+            "Spacing sets velocity directly. Measurement Error is included in every GAE result.",
             style = MaterialTheme.typography.bodyLarge,
             color = TextDim,
             textAlign = TextAlign.Center,
         )
 
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(32.dp))
         Button(
-            onClick = { vm.saveDistance(value ?: 0.0, uncertainty ?: 0.0, unit) },
-            enabled = value != null && value > 0 && uncertainty != null &&
-                uncertainty >= 0 && uncertainty < value,
+            onClick = {
+                vm.saveDistance(value ?: 0.0, unit, measurementError ?: 0.0, errorUnit)
+            },
+            enabled = value != null && value > 0 && measurementError != null &&
+                measurementError >= 0 &&
+                measurementError * errorUnit.toMeters < value * unit.toMeters,
             modifier = Modifier.fillMaxWidth().height(54.dp),
         ) { Text("Save distance") }
     }

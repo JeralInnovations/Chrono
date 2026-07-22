@@ -236,11 +236,12 @@ it (allow "install from unknown sources" when asked).
    the baseline isolates the cable+sensor load. If the reading looks like an
    empty port, the app warns you the sensor may not be plugged in.
 4. **Sensor 2 (STOP)** — same procedure for port 2.
-5. **Sensor spacing** — enter the measured distance between the sensors and
-   your estimated `+/-` measurement range (inches by default; mm / cm / ft also
-   available). Velocity is computed directly from this distance. At a 6 in gap,
-   `+/-0.02 in` contributes about `+/-0.33%`; `+/-0.25 in` contributes about
-   `+/-4.17%` before timing uncertainty is compounded into the GAE.
+5. **Sensor spacing** — enter the measured distance between the sensors, then
+   enter its **Measurement Error** as a `+/-` value. Spacing and Measurement
+   Error each have their own in / mm / cm / ft selector. Velocity is computed
+   directly from spacing. At a 6 in gap, `+/-0.02 in` contributes about
+   `+/-0.33%`; `+/-0.25 in` contributes about `+/-4.17%` before timing
+   uncertainty is compounded into the GAE.
 
 The dashboard's **Channel calibration** card shows each port's measured load
 (≈ pF) and flags whether the two channels are matched; **Recheck** reruns the
@@ -279,7 +280,7 @@ save to Drive, etc.
 revision and timing spec (timer tick, crystal tolerance, front-end jitter)
 over BLE. Each result shows a roughly 99%-style Guaranteed Accuracy Envelope
 (GAE) compounded from those numbers, measured channel mismatch, calibration
-repeatability, and the user's `+/-` spacing range. A future hardware revision
+repeatability, and the user's `+/-` Measurement Error. A future hardware revision
 that reports tighter numbers automatically shows a tighter GAE without an app
 update. Unidentified older firmware is assumed to be revision 1.
 
@@ -288,6 +289,10 @@ sensors as consumed on the dashboard's rig diagram (torn amber screens) and
 disables ARM. Fit fresh wire, tap the torn sensor in the diagram to retest it —
 the app re-verifies the trigger and automatically re-measures the new screen's
 electrical load before the next shot can be armed.
+
+Only one result is accepted per completed setup. Repeated BLE delivery is
+deduplicated by logger boot ID plus result ID, and the setup does not reopen for
+another result until both channels have been restored to Ready.
 5. **Dashboard** — from here you can:
    - **Retest 1 / Retest 2** — re-run either sensor test any time
    - **Change** — edit the sensor spacing

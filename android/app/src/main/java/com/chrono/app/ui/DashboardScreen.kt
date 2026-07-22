@@ -94,6 +94,7 @@ import com.chrono.app.ble.HealthStatus
 import com.chrono.app.ble.Proto
 import com.chrono.app.ble.SimFault
 import com.chrono.app.data.Exporter
+import com.chrono.app.data.DistanceUnit
 import com.chrono.app.data.TARGET_DIST_UNITS
 import com.chrono.app.data.TestResult
 import com.chrono.app.ui.theme.Amber
@@ -1127,12 +1128,17 @@ private fun RigCard(vm: ChronoViewModel, enabled: Boolean) {
                     SpanArrow()
                     TextButton(onClick = { vm.changeDistance() }, enabled = enabled) {
                         Text(
-                            "${trimZeros(vm.distanceInUnit())} +/- " +
-                                "${trimZeros(vm.distanceUncertaintyValue)} ${vm.distanceUnit.label}",
+                            "${trimZeros(vm.distanceInUnit())} ${vm.distanceUnit.label}",
                             color = Teal,
                             style = MaterialTheme.typography.titleMedium,
                         )
                     }
+                    Text(
+                        "Measurement Error: +/- ${trimZeros(vm.measurementErrorValue)} " +
+                            vm.measurementErrorUnit.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextDim,
+                    )
                     Text(
                         "tap to change",
                         style = MaterialTheme.typography.labelSmall,
@@ -1148,7 +1154,7 @@ private fun RigCard(vm: ChronoViewModel, enabled: Boolean) {
                             Spacer(Modifier.size(6.dp))
                             InfoDot(
                                 "Guaranteed Accuracy Envelope (GAE)",
-                                "The Guaranteed Accuracy Envelope (GAE) is the app's conservative +/- percent range around the measured velocity. For example, 1000 ft/s with +/- 2% GAE means the measurement should be treated as about 980 to 1020 ft/s. The app combines timer resolution, clock drift, edge jitter, your entered spacing measurement range, and calibration data. Faster shots and shorter sensor spacing widen the envelope because the same timing error is a larger share of the measurement. Closely matched channel calibration narrows it.",
+                                "The Guaranteed Accuracy Envelope (GAE) is the app's conservative +/- percent range around the measured velocity. For example, 1000 ft/s with +/- 2% GAE means the measurement should be treated as about 980 to 1020 ft/s. The app combines timer resolution, clock drift, edge jitter, your entered Measurement Error, and calibration data. Faster shots and shorter sensor spacing widen the envelope because the same timing error is a larger share of the measurement. Closely matched channel calibration narrows it.",
                             )
                         }
                     }
@@ -1891,13 +1897,17 @@ private fun EditResultDialog(
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 if (showRecordedValues) {
                     val spacingIn = result.distanceM * 39.3701
-                    val spacingRangeIn = result.distanceUncertaintyM * 39.3701
+                    val errorUnit = runCatching {
+                        DistanceUnit.valueOf(result.measurementErrorUnit)
+                    }.getOrDefault(DistanceUnit.INCHES)
+                    val measurementError = result.measurementErrorM / errorUnit.toMeters
                     val velocityText = if (result.metersPerSecond > 0)
                         "%.1f ft/s".format(result.feetPerSecond) else "Not recorded"
                     ReadOnlyLogValue("Velocity", velocityText)
+                    ReadOnlyLogValue("SENSOR SPACING", "%.3f in".format(spacingIn))
                     ReadOnlyLogValue(
-                        "SENSOR SPACING",
-                        "%.3f +/- %.3f in".format(spacingIn, spacingRangeIn),
+                        "MEASUREMENT ERROR",
+                        "+/- ${trimZeros(measurementError)} ${errorUnit.label}",
                     )
                     ReadOnlyLogValue("Split time", result.splitTimeText())
                     if (result.deviceSerial.isNotBlank()) {
