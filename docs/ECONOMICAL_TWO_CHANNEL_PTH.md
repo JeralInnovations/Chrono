@@ -14,7 +14,7 @@ Chrono Logger PCB. It supersedes the earlier low-capacitance TVS, BAT54S, and
 | STOP timing input | D1 |
 | START charge/test | D2 through 10k 1% |
 | STOP charge/test | D3 through 10k 1% |
-| Reset/cancel button | D4 to GND; firmware pull-up; press to return logger to idle |
+| Power button | D4 to GND; firmware pull-up; hold 1.5 seconds for System OFF or wake; short presses do nothing |
 | External status LED | D5 through 330 ohms |
 | Reserved UART | D6/D7 |
 | Available/remappable I2C | D8/D9 |
@@ -111,6 +111,7 @@ Implemented for this board:
 - simulation fault selection;
 - diagnostic/result export with device and raw timing metadata;
 - filtered battery reporting, per-result voltage, and a warning-only low-battery state.
+- low-leakage System OFF with debounced D4 long-press shutdown and wake.
 
 Deferred because this PCB lacks the required hardware or validation:
 
@@ -118,7 +119,6 @@ Deferred because this PCB lacks the required hardware or validation:
 - four timing channels and buffered threshold inputs;
 - BLE bonding or a physical remote-arm confirmation policy;
 - flash-journaled pending results across complete logger power loss.
-- low-leakage storage sleep and D4 system-off wake;
 - Android foreground BLE service and background reconnection;
 - sensor inventory, matched-pair management, saved templates, and series
   statistics/outlier analysis.
@@ -130,8 +130,12 @@ BLE loss but not complete logger power loss.
 
 ## Bring-Up Checks
 
-1. Confirm D4 reads high normally and low while the button is pressed.
-2. Confirm D5 drives the external LED without using the onboard LED mapping.
+1. Confirm D4 reads high normally and low while the button is pressed. Verify a
+   short press has no effect, a 1.5-second hold powers off, and only another
+   complete 1.5-second hold restores normal operation.
+2. Confirm D5 drives the external LED without using the onboard LED mapping:
+   flashing while held, three quick power-on flashes, and two slower power-off
+   flashes followed by darkness.
 3. Scope both raw junctions and sense junctions during soft and hard strikes.
 4. Confirm the P4KE15CA and both 1N5711 orientations from the schematic/netlist.
 5. Run empty and loaded RC checks on both channels.

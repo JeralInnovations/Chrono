@@ -12,7 +12,7 @@ JeralInnovations nice!nano v2 Arduino core.
 | STOP input | D1 from the protected CH2 piezo sense node |
 | CH1 RC charge/test | D2 through 10k 1% to CH1 sense node |
 | CH2 RC charge/test | D3 through 10k 1% to CH2 sense node |
-| Reset/cancel button | D4 to GND; press to cancel and return to idle |
+| Power button | D4 to GND; hold 1.5 seconds for System OFF or wake; short presses do nothing |
 | Status LED | GPIO 15, active high, through its LED resistor to GND |
 | Battery | Protected 1S LiPo on the nice!nano battery/input rail |
 

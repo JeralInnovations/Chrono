@@ -66,6 +66,8 @@ const uint8_t SENSOR2_PIN = 1;   // D1 - STOP
 const uint8_t CHARGE1_PIN = 2;   // D2 -> 10k 1% -> sensor-1 node (calibration)
 const uint8_t CHARGE2_PIN = 3;   // D3 -> 10k 1% -> sensor-2 node (calibration)
 const uint8_t WAKE_BUTTON_PIN = 4;
+const uint32_t POWER_LONG_PRESS_MS = 1500UL;
+const uint32_t BUTTON_DEBOUNCE_MS = 30UL;
 
 #if CHRONO_BOARD_PROFILE == CHRONO_BOARD_XIAO
 const uint8_t HW_REV = 2;        // economical XIAO two-channel PTH board
@@ -210,7 +212,7 @@ struct __attribute__((packed)) CalResult {
 // end) reports different numbers here and the app's confidence estimate
 // follows automatically — no app update needed.
 const uint8_t FW_MAJOR = 2;
-const uint8_t FW_MINOR = 3;
+const uint8_t FW_MINOR = 4;
 
 enum : uint16_t {
   PORT_STUCK_HIGH = 1 << 0,
@@ -276,6 +278,8 @@ bool     hfxoOn         = false;
 volatile uint8_t calRequested = 0;   // 1 or 2; handled in loop()
 volatile uint8_t healthRequested = 0; // 1 normal, 2 logged override arm
 uint32_t identifyUntilMs = 0;
+bool powerButtonHolding = false;
+uint32_t powerButtonPressedAtMs = 0;
 uint32_t startedAtMs = 0;
 uint8_t activeResultFlags = 0;
 HealthPacket health = { 1, 2, PORT_MISSING_SENSOR, PORT_MISSING_SENSOR, 0, 0, 0 };
@@ -742,6 +746,85 @@ void setState(uint8_t s) {
   notifyStatus();
 }
 
+void waitForButtonRelease() {
+  uint32_t releasedAtMs = 0;
+  while (true) {
+    if (digitalRead(WAKE_BUTTON_PIN) == HIGH) {
+      if (releasedAtMs == 0) releasedAtMs = millis();
+      if ((uint32_t)(millis() - releasedAtMs) >= BUTTON_DEBOUNCE_MS) return;
+    } else {
+      releasedAtMs = 0;
+    }
+    delay(1);
+  }
+}
+
+void enterSystemOff() {
+  statusLedWrite(false);
+  nrf_gpio_cfg_default(g_ADigitalPinMap[SENSOR1_PIN]);
+  nrf_gpio_cfg_default(g_ADigitalPinMap[SENSOR2_PIN]);
+  nrf_gpio_cfg_default(g_ADigitalPinMap[CHARGE1_PIN]);
+  nrf_gpio_cfg_default(g_ADigitalPinMap[CHARGE2_PIN]);
+  systemOff(WAKE_BUTTON_PIN, LOW);  // D4 pull-up, wake when the button pulls low
+  while (true) delay(1000);         // systemOff() does not normally return
+}
+
+void showPowerOnPattern() {
+  for (uint8_t i = 0; i < 3; i++) {
+    statusLedWrite(true);
+    delay(90);
+    statusLedWrite(false);
+    delay(90);
+  }
+}
+
+void showPowerOffPattern() {
+  for (uint8_t i = 0; i < 2; i++) {
+    statusLedWrite(true);
+    delay(240);
+    statusLedWrite(false);
+    delay(180);
+  }
+}
+
+void requireLongPressAfterSystemOffWake(uint32_t startupResetCause) {
+  if ((startupResetCause & POWER_RESETREAS_OFF_Msk) == 0) {
+    showPowerOnPattern();
+    return;
+  }
+
+  delay(BUTTON_DEBOUNCE_MS);
+  if (digitalRead(WAKE_BUTTON_PIN) != LOW) enterSystemOff();
+
+  uint32_t pressedAtMs = millis();
+  while ((uint32_t)(millis() - pressedAtMs) < POWER_LONG_PRESS_MS) {
+    if (digitalRead(WAKE_BUTTON_PIN) != LOW) {
+      waitForButtonRelease();
+      enterSystemOff();
+    }
+    statusLedWrite(((millis() - pressedAtMs) / 180UL & 1UL) == 0UL);
+    delay(2);
+  }
+
+  statusLedWrite(true);             // hold accepted
+  waitForButtonRelease();
+  showPowerOnPattern();
+}
+
+void powerOffFromButton() {
+  healthRequested = 0;
+  calRequested = 0;
+  fetchRequested = false;
+  armed = false;
+  started = false;
+  finished = false;
+  disarmTiming();
+  state = ST_IDLE;
+  showPowerOffPattern();
+  waitForButtonRelease();
+  enterSystemOff();
+}
+
 void pollUserButton() {
   static bool rawDown = false;
   static bool stableDown = false;
@@ -752,19 +835,18 @@ void pollUserButton() {
     rawDown = down;
     rawChangedAtMs = millis();
   }
-  if (down == stableDown || (uint32_t)(millis() - rawChangedAtMs) < 30UL) return;
+  if (down == stableDown) {
+    if (stableDown &&
+        (uint32_t)(millis() - powerButtonPressedAtMs) >= POWER_LONG_PRESS_MS) {
+      powerOffFromButton();
+    }
+    return;
+  }
+  if ((uint32_t)(millis() - rawChangedAtMs) < BUTTON_DEBOUNCE_MS) return;
 
   stableDown = down;
-  if (!stableDown) return;
-
-  healthRequested = 0;
-  calRequested = 0;
-  armed = false;
-  started = false;
-  finished = false;
-  disarmTiming();
-  setState(ST_IDLE);
-  identifyUntilMs = millis() + 600UL;  // visible acknowledgment of the reset
+  powerButtonHolding = stableDown;
+  if (stableDown) powerButtonPressedAtMs = millis();
 }
 
 // --------------------------------------------------------- BLE callbacks
@@ -847,8 +929,10 @@ void onDisconnect(uint16_t conn_hdl, uint8_t reason) {
 void setup() {
   statusLedBegin();
   pinMode(WAKE_BUTTON_PIN, INPUT_PULLUP);
+  uint32_t startupResetCause = NRF_POWER->RESETREAS;
+  requireLongPressAfterSystemOffWake(startupResetCause);
   bootId = makeBootId();
-  resetCause = NRF_POWER->RESETREAS;
+  resetCause = startupResetCause;
   NRF_POWER->RESETREAS = resetCause;
 
   Bluefruit.begin();
@@ -1020,8 +1104,10 @@ void loop() {
     notifyStatus();
   }
 
-  // Identify has priority; standby blinks, timing is solid, faults double-blink.
-  if ((int32_t)(identifyUntilMs - millis()) > 0) {
+  // A held power button overrides normal state indication until accepted/released.
+  if (powerButtonHolding) {
+    statusLedWrite((((millis() - powerButtonPressedAtMs) / 180UL) & 1UL) == 0UL);
+  } else if ((int32_t)(identifyUntilMs - millis()) > 0) {
     statusLedWrite(((millis() / 150UL) & 1UL) == 0UL);
   } else if (state == ST_ARMED) {
     statusLedWrite(((millis() / 1000UL) % 2UL) == 0UL);
