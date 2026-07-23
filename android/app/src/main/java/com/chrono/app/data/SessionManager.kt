@@ -58,8 +58,14 @@ class SessionManager(private val context: Context, simulation: Boolean = false) 
     /** Prompt for a project only on a genuinely new day (or first run). */
     fun needsProjectPrompt(): Boolean = projectName == null || projectDay != today()
 
-    /** Default label for the next test: Test1, Test2, … within this project. */
-    fun suggestedLabel(): String = "Test${testCounter + 1}"
+    /**
+     * The open test folder is authoritative until its shot is logged. This is
+     * important after returning from the camera, when testCounter has already
+     * advanced but setup photos still belong to the open test.
+     */
+    fun suggestedLabel(): String =
+        currentTestRel?.takeUnless { shotLogged }?.substringAfterLast('/')
+            ?: "Test${testCounter + 1}"
 
     val pathLabel: String get() = "Documents/$rootDir/${projectName ?: ""}"
 
@@ -94,9 +100,53 @@ class SessionManager(private val context: Context, simulation: Boolean = false) 
         save()
     }
 
+    /** Apply a UI label edit to an existing, unlogged test folder. */
+    fun commitCurrentTestLabel(label: String): String {
+        val currentRel = currentTestRel?.takeUnless { shotLogged }
+            ?: return sanitize(label).ifBlank { "Test${testCounter + 1}" }
+        return renameTestFolder(currentRel, label).second
+    }
+
+    /** Open the test if needed and return the exact folder/label name selected. */
+    fun prepareTestLabel(label: String): String {
+        val rel = currentTest(label)
+        return rel.substringAfterLast('/')
+    }
+
+    /**
+     * Rename a test folder and return its effective relative path and label.
+     * MediaStore item ids are retained, so existing photo URIs remain valid.
+     */
+    fun renameTestFolder(rel: String, label: String): Pair<String, String> {
+        if (rel.isBlank()) return rel to sanitize(label)
+        val oldName = rel.substringAfterLast('/')
+        val requested = sanitize(label).ifBlank { oldName }
+        if (oldName == requested) return rel to oldName
+
+        val project = rel.substringBeforeLast('/')
+        val newName = if (project == projectName) {
+            uniqueName(requested, excluding = oldName)
+        } else {
+            requested
+        }
+        val newRel = "$project/$newName"
+        if (!moveTestFolder(rel, newRel)) return rel to oldName
+
+        if (project == projectName) replaceUsedName(oldName, newName)
+        if (currentTestRel == rel) {
+            currentTestRel = newRel
+            save()
+        }
+        return newRel to newName
+    }
+
     /** Folder for the current test cycle; rolls a new one after a logged shot. */
     private fun currentTest(label: String): String {
-        if (currentTestRel == null || shotLogged) rollTest(label)
+        if (currentTestRel == null || shotLogged) {
+            rollTest(label)
+        } else {
+            commitCurrentTestLabel(label)
+        }
         return currentTestRel!!
     }
 
@@ -259,12 +309,67 @@ class SessionManager(private val context: Context, simulation: Boolean = false) 
         prefs.edit().putStringSet("used_$projectName", s).apply()
     }
 
-    private fun uniqueName(base: String): String {
-        val used = usedNames()
+    private fun replaceUsedName(old: String, new: String) {
+        val names = usedNames()
+        names.remove(old)
+        names.add(new)
+        prefs.edit().putStringSet("used_$projectName", names).apply()
+    }
+
+    private fun uniqueName(base: String, excluding: String? = null): String {
+        val used = usedNames().apply { excluding?.let { remove(it) } }
         if (base !in used) return base
         var i = 2
         while ("${base}_$i" in used) i++
         return "${base}_$i"
+    }
+
+    private fun moveTestFolder(oldRel: String, newRel: String): Boolean {
+        if (oldRel == newRel) return true
+        if (!useMediaStore) {
+            val root = context.getExternalFilesDir(null) ?: context.filesDir
+            val oldDir = File(root, "$rootDir/$oldRel")
+            val newDir = File(root, "$rootDir/$newRel")
+            if (!oldDir.exists()) return true
+            newDir.parentFile?.mkdirs()
+            return oldDir.renameTo(newDir)
+        }
+
+        val resolver = context.contentResolver
+        val collection = MediaStore.Files.getContentUri("external")
+        val oldPath = "Documents/$rootDir/$oldRel/"
+        val newPath = "Documents/$rootDir/$newRel/"
+        val ids = mutableListOf<Long>()
+        val queried = runCatching {
+            resolver.query(
+                collection,
+                arrayOf(MediaStore.MediaColumns._ID),
+                "${MediaStore.MediaColumns.RELATIVE_PATH}=?",
+                arrayOf(oldPath),
+                null,
+            )?.use { cursor ->
+                val idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                while (cursor.moveToNext()) ids.add(cursor.getLong(idColumn))
+            }
+        }
+        if (queried.isFailure) return false
+
+        val moved = mutableListOf<Uri>()
+        for (id in ids) {
+            val uri = ContentUris.withAppendedId(collection, id)
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.RELATIVE_PATH, newPath)
+            }
+            if (runCatching { resolver.update(uri, values, null, null) }.getOrDefault(0) != 1) {
+                val rollback = ContentValues().apply {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, oldPath)
+                }
+                moved.forEach { runCatching { resolver.update(it, rollback, null, null) } }
+                return false
+            }
+            moved.add(uri)
+        }
+        return true
     }
 
     /** Best-effort: open the data folder in the system Files app. */

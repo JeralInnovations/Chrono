@@ -1330,6 +1330,7 @@ private fun ChannelsCard(vm: ChronoViewModel, enabled: Boolean) {
 @Composable
 private fun NextTestCard(vm: ChronoViewModel, armed: Boolean) {
     val fieldText = MaterialTheme.typography.bodyMedium
+    var labelHadFocus by remember { mutableStateOf(false) }
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp)) {
             Text("Next test", style = MaterialTheme.typography.titleMedium)
@@ -1345,7 +1346,13 @@ private fun NextTestCard(vm: ChronoViewModel, armed: Boolean) {
             OutlinedTextField(
                 value = vm.pendingLabel,
                 onValueChange = { vm.pendingLabel = it },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { focus ->
+                        val commit = labelHadFocus && !focus.isFocused
+                        labelHadFocus = focus.isFocused
+                        if (commit) vm.commitPendingLabel()
+                    },
                 label = { FieldLabel("LABEL", "Short name for this shot, such as Test 1 or 20 degree upward angle.") },
                 placeholder = { Text("Test 1", color = TextDim) },
                 textStyle = fieldText,

@@ -35,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -285,9 +286,16 @@ fun SensorSetupScreen(
     val baselineEntry = vm.calData["b$sensor"]
     val loadEntry = vm.calData["l$sensor"]
     val role = if (sensor == 1) "START" else "STOP"
+    val scrollState = rememberScrollState()
+
+    // Successful detection adds status content above the action area. Keep the
+    // newly enabled Continue button visible instead of requiring a manual swipe.
+    LaunchedEffect(wasVerified, scrollState.maxValue) {
+        if (wasVerified) scrollState.animateScrollTo(scrollState.maxValue)
+    }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(28.dp).verticalScroll(rememberScrollState()),
+        modifier = Modifier.fillMaxSize().padding(28.dp).verticalScroll(scrollState),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(20.dp))

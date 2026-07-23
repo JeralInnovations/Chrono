@@ -101,6 +101,16 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         projectPrompt = false
     }
 
+    fun commitPendingLabel() {
+        pendingLabel = session.commitCurrentTestLabel(pendingLabel)
+    }
+
+    private fun preparePendingTestLabel(): String {
+        val label = session.prepareTestLabel(pendingLabel)
+        pendingLabel = label
+        return label
+    }
+
     /** "setup" or "after" while the photo dialog is showing. */
     var photoPrompt by mutableStateOf<String?>(null)
         private set
@@ -150,7 +160,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     /** Create the next photo target inside the right test folder. */
     fun newPhotoUri(): Uri? {
         val kind = photoPrompt ?: return null
-        return session.newPhotoUri(kind, pendingLabel.trim())
+        return session.newPhotoUri(kind, preparePendingTestLabel())
     }
 
     fun promptPhotos(kind: String): List<Uri> =
@@ -164,9 +174,10 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
 
     fun importPromptPhotos(uris: List<Uri>) {
         val kind = photoPrompt ?: return
+        val label = preparePendingTestLabel()
         var added = 0
         for (uri in uris) {
-            if (session.importPromptPhoto(kind, pendingLabel.trim(), uri)) added++
+            if (session.importPromptPhoto(kind, label, uri)) added++
         }
         if (added > 0) {
             photoCount += added
@@ -413,6 +424,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         if (!duplicate && !setupResultRecorded) {
+            val testLabel = preparePendingTestLabel()
             val rec = TestResult(
                 uid = UUID.randomUUID().toString(),
                 deviceResultId = r.id,
@@ -420,7 +432,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
                 distanceM = distanceM,
                 measurementErrorM = measurementErrorM,
                 measurementErrorUnit = measurementErrorUnit.name,
-                label = pendingLabel.trim(),
+                label = testLabel,
                 epochMillis = if (r.epochSec > 0) r.epochSec * 1000L else null,
                 shotType = pendingShotType.ifBlank { "Standard" },
                 tool = pendingTool.trim(),
@@ -486,8 +498,11 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         val idx = results.indexOfFirst { it.uid == uid }
         if (idx < 0) return
         val r = results[idx]
+        val existingRel = session.folderForResult(r.shotFolder, r.uid)
+        val (rel, effectiveLabel) = session.renameTestFolder(existingRel, label)
         val updated = r.copy(
-            label = label,
+            label = effectiveLabel,
+            shotFolder = rel,
             shotType = shotType.ifBlank { "Standard" },
             tool = tool,
             disruptorLoading = disruptorLoading,
@@ -500,8 +515,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
             outcome = specialNotes,
             epochMillis = epochMillis ?: r.epochMillis,
         )
-        val rel = session.folderForResult(updated.shotFolder, updated.uid)
-        results[idx] = if (updated.shotFolder == rel) updated else updated.copy(shotFolder = rel)
+        results[idx] = updated
         persist()
         session.updateShot(rel, shotJson(results[idx]))
     }
@@ -524,12 +538,13 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         photos: List<Uri> = emptyList(),
     ) {
         val mps = velocity?.let { if (velocityIsFps) it / 3.28084 else it }
+        val testLabel = session.prepareTestLabel(label)
         val rec = TestResult(
             uid = UUID.randomUUID().toString(),
             deviceResultId = -1,
             splitNs = 0,
             distanceM = 0.0,
-            label = label.trim(),
+            label = testLabel,
             epochMillis = epochMillis,
             shotType = shotType.trim().ifBlank { "Standard" },
             tool = tool.trim(),
