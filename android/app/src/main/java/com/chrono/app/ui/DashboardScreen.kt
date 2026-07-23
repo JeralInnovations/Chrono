@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -286,6 +287,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                     SetupPhotoStrip(
                         photos = setupPhotos,
                         selected = selectedSetupPhoto,
+                        onAdd = { vm.requestSetupPhotos() },
                         onOpen = { promptPhotoPreview = it },
                         onSelect = { selectedSetupPhoto = if (selectedSetupPhoto == it) null else it },
                         onDelete = {
@@ -563,7 +565,10 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Column(
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     OutlinedButton(onClick = {
@@ -714,7 +719,10 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
                     "Tap image to close",
                     style = MaterialTheme.typography.bodyMedium,
                     color = Color.White.copy(alpha = 0.7f),
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .padding(24.dp),
                 )
             }
         }
@@ -725,6 +733,7 @@ fun DashboardScreen(vm: ChronoViewModel, connState: ConnState, deviceStatus: Dev
 private fun SetupPhotoStrip(
     photos: List<android.net.Uri>,
     selected: android.net.Uri?,
+    onAdd: () -> Unit,
     onOpen: (android.net.Uri) -> Unit,
     onSelect: (android.net.Uri) -> Unit,
     onDelete: () -> Unit,
@@ -742,6 +751,11 @@ private fun SetupPhotoStrip(
                 color = TextDim,
                 modifier = Modifier.weight(1f),
             )
+            TextButton(onClick = onAdd) {
+                Icon(Icons.Filled.PhotoCamera, null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.size(6.dp))
+                Text("Add")
+            }
             if (selected != null) {
                 TextButton(onClick = onDelete) {
                     Icon(Icons.Filled.Delete, null, tint = Bad, modifier = Modifier.size(16.dp))

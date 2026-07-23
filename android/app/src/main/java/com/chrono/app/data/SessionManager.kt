@@ -58,13 +58,9 @@ class SessionManager(private val context: Context, simulation: Boolean = false) 
     /** Prompt for a project only on a genuinely new day (or first run). */
     fun needsProjectPrompt(): Boolean = projectName == null || projectDay != today()
 
-    /**
-     * The open test folder is authoritative until its shot is logged. This is
-     * important after returning from the camera, when testCounter has already
-     * advanced but setup photos still belong to the open test.
-     */
+    /** The active test folder remains authoritative through its after photos. */
     fun suggestedLabel(): String =
-        currentTestRel?.takeUnless { shotLogged }?.substringAfterLast('/')
+        currentTestRel?.substringAfterLast('/')
             ?: "Test${testCounter + 1}"
 
     val pathLabel: String get() = "Documents/$rootDir/${projectName ?: ""}"
@@ -100,11 +96,21 @@ class SessionManager(private val context: Context, simulation: Boolean = false) 
         save()
     }
 
-    /** Apply a UI label edit to an existing, unlogged test folder. */
+    /** Apply a UI label edit to the active test folder. */
     fun commitCurrentTestLabel(label: String): String {
-        val currentRel = currentTestRel?.takeUnless { shotLogged }
+        val currentRel = currentTestRel
             ?: return sanitize(label).ifBlank { "Test${testCounter + 1}" }
         return renameTestFolder(currentRel, label).second
+    }
+
+    /**
+     * End the active folder only for an explicit New Test or saved manual log.
+     * The next photo or result creates the next numbered folder.
+     */
+    fun beginNewTest() {
+        currentTestRel = null
+        shotLogged = false
+        save()
     }
 
     /** Open the test if needed and return the exact folder/label name selected. */
@@ -140,9 +146,9 @@ class SessionManager(private val context: Context, simulation: Boolean = false) 
         return newRel to newName
     }
 
-    /** Folder for the current test cycle; rolls a new one after a logged shot. */
+    /** Folder for the active test cycle. Only beginNewTest() advances it. */
     private fun currentTest(label: String): String {
-        if (currentTestRel == null || shotLogged) {
+        if (currentTestRel == null) {
             rollTest(label)
         } else {
             commitCurrentTestLabel(label)

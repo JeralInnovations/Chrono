@@ -160,7 +160,8 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
     /** Create the next photo target inside the right test folder. */
     fun newPhotoUri(): Uri? {
         val kind = photoPrompt ?: return null
-        return session.newPhotoUri(kind, preparePendingTestLabel())
+        val label = if (kind == "setup") preparePendingTestLabel() else pendingLabel.trim()
+        return session.newPhotoUri(kind, label)
     }
 
     fun promptPhotos(kind: String): List<Uri> =
@@ -174,7 +175,7 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
 
     fun importPromptPhotos(uris: List<Uri>) {
         val kind = photoPrompt ?: return
-        val label = preparePendingTestLabel()
+        val label = if (kind == "setup") preparePendingTestLabel() else pendingLabel.trim()
         var added = 0
         for (uri in uris) {
             if (session.importPromptPhoto(kind, label, uri)) added++
@@ -538,7 +539,11 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         photos: List<Uri> = emptyList(),
     ) {
         val mps = velocity?.let { if (velocityIsFps) it / 3.28084 else it }
-        val testLabel = session.prepareTestLabel(label)
+        val previousLabel = session.suggestedLabel()
+        session.beginNewTest()
+        val requestedLabel =
+            if (label.trim() == previousLabel) session.suggestedLabel() else label
+        val testLabel = session.prepareTestLabel(requestedLabel)
         val rec = TestResult(
             uid = UUID.randomUUID().toString(),
             deviceResultId = -1,
@@ -1033,8 +1038,12 @@ class ChronoViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Re-run the whole wizard, including a fresh bare-port baseline. */
+    /** Start a new test and re-run the whole wizard from a bare-port baseline. */
     fun redoSetup() {
+        session.beginNewTest()
+        pendingLabel = session.suggestedLabel()
+        setupResultRecorded = false
+        prefs.edit().putBoolean(setupResultKey(), false).apply()
         screen = Screen.BASELINE
     }
 
